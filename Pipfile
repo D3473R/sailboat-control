@@ -1,0 +1,16 @@
+[[source]]
+name = "pypi"
+url = "https://pypi.org/simple"
+verify_ssl = true
+
+[dev-packages]
+yapf = "*"
+
+[packages]
+paho-mqtt = "*"
+geojson = "*"
+numpy = "*"
+geographiclib = "*"
+
+[requires]
+python_version = "3.7"
