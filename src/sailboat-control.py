@@ -24,6 +24,8 @@ wind_direction = 0
 wind_speed = 7.71604938271605
 wind_data = False
 
+boat_heading = 0
+
 with open('wind.json') as g:
     wind = json.load(g)
 
@@ -161,6 +163,9 @@ class Path:
                     self.add_length(vector.get_length())
                     self.add_time(vector.get_length() / boat_speed)
         return impossible_path
+
+    def get_heading(self):
+        return self.__vectors[0].get_angle_degrees()
 
     def get_vectors(self):
         return self.__vectors
@@ -307,6 +312,16 @@ def main():
                 paths = calculate_initial_paths(angle_between_angles(90, geodesic['azi1']), geodesic['s12'])
                 best_path = calculate_best_path(paths, PATH_CALCULATION_ITERATIONS)
                 logging.info('Best path is {}'.format(best_path))
+
+                heading_delta = angle_between_angles(boat_heading, best_path.get_heading())
+                logging.info('Heading delta is: {:.2f}°'.format(heading_delta))
+
+                degree_range = -360 - 360
+                servo_range = 450 - 220
+
+                rudder_value = (heading_delta - 360) * servo_range / degree_range + 220
+                logging.info('Rudder value is: {:.2f}'.format(rudder_value))
+
                 time.sleep(PATH_CALCULATION_TIMEOUT)
         if cyclic:
             logging.info('Start new cycle')
