@@ -129,7 +129,8 @@ class Path:
 
     def __repr__(self):
         return json.dumps(
-            {'path': {'length': self.__length, 'time': self.__time, 'vectors': json.loads(str(self.__vectors))}})
+            {'path': {'length': round(self.__length, 2), 'time': round(self.__time, 2),
+                      'vectors': json.loads(str(self.__vectors))}})
 
 
 def main():
@@ -167,7 +168,9 @@ def main():
         v2_a = Vector(math.radians(90), v1.get_opposite_len())
         v2_b = Vector(v1.get_opposite_angle(v2_a), v1.get_adjacent_len())
         v3_a = Vector(math.radians(90), v2_a.get_length() / 2)
-        v3_b = Vector(math.radians(angle_between_angles(90, math.degrees(math.atan(v2_b.get_length() / v3_a.get_length())))), median(v1.get_length(), v2_b.get_length(), v2_a.get_length()))
+        v3_b = Vector(
+            math.radians(angle_between_angles(90, math.degrees(math.atan(v2_b.get_length() / v3_a.get_length())))),
+            median(v1.get_length(), v2_b.get_length(), v2_a.get_length()))
 
         paths = [Path(v1), Path(v2_a, v2_b), Path(v3_a, v3_b)]
         times = {}
@@ -199,7 +202,7 @@ def main():
         break
 
     # while True:
-        # pass
+    # pass
 
 
 if __name__ == '__main__':
