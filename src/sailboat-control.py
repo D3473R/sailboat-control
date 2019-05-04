@@ -40,7 +40,7 @@ def on_message(client, userdata, msg):
 
 
 def unit_vector(angle):
-    return np.array([round(np.cos(angle), 2), round(np.sin(angle), 2)])
+    return np.array([np.cos(angle), np.sin(angle)])
 
 
 def angle_between_vectors(v1, v2):
@@ -71,7 +71,7 @@ class Vector:
     __vector = None
 
     def __init__(self, angle, length):
-        self.__vector = np.array([round(np.cos(angle), 2), round(np.sin(angle), 2)]) * length
+        self.__vector = np.array([np.cos(angle), np.sin(angle)]) * length
 
     def get_angle(self):
         v1 = self.__vector
@@ -103,7 +103,7 @@ class Vector:
         return math.asin(math.radians(cathetus.get_length() / self.get_length()))
 
     def __repr__(self):
-        return json.dumps({'vector': '[{:.2f}, {:.2f}]'.format(round(self.__vector[0], 2), round(self.__vector[1], 2))})
+        return json.dumps({'vector': '[{:.2f}, {:.2f}]'.format(self.__vector[0], self.__vector[1])})
 
 
 class Path:
@@ -135,7 +135,7 @@ class Path:
 
     def __repr__(self):
         return json.dumps(
-            {'path': {'length': round(self.__length, 2), 'time': round(self.__time, 2),
+            {'path': {'length': '{:.2f}'.format(self.__length), 'time': '{:.2f}'.format(self.__time),
                       'vectors': json.loads(str(self.__vectors))}})
 
 
@@ -188,8 +188,8 @@ def main():
                     logging.info('Vector {}: {}'.format(k, vector))
                     apparent_wind_angle = angle_between_angles(wind_direction, vector.get_angle_degrees())
                     if apparent_wind_angle < WIND_ANGLE_THRESHOLD_DEGREE:
-                        logging.info('Path {}: {} has an impossible angle in Vector: {} {} with {}°'
-                                     .format(path.get_index(), path, k, vector, round(apparent_wind_angle, 2)))
+                        logging.info('Path {}: {} has an impossible angle in Vector: {} {} with {:.2f}°'
+                                     .format(path.get_index(), path, k, vector, apparent_wind_angle))
                         impossible_path = True
                         impossible_paths.append(j)
                     else:
