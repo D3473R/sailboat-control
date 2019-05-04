@@ -13,6 +13,7 @@ from geographiclib.geodesic import Geodesic
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
 
 MS_KN = 1.944
+WIND_ANGLE_THRESHOLD_DEGREE = 15
 
 wind_direction = 0
 wind_speed = 7.71604938271605
@@ -108,8 +109,10 @@ class Vector:
 class Path:
     __length = 0
     __time = 0
+    __index = -1
 
-    def __init__(self, *vectors):
+    def __init__(self, index, *vectors):
+        self.__index = index
         self.__vectors = list(vectors)
 
     def get_vectors(self):
@@ -126,6 +129,9 @@ class Path:
 
     def add_time(self, time):
         self.__time += time
+
+    def get_index(self):
+        return self.__index
 
     def __repr__(self):
         return json.dumps(
@@ -172,32 +178,42 @@ def main():
             math.radians(angle_between_angles(90, math.degrees(math.atan(v2_b.get_length() / v3_a.get_length())))),
             median(v1.get_length(), v2_b.get_length(), v2_a.get_length()))
 
-        paths = [Path(v1), Path(v2_a, v2_b), Path(v3_a, v3_b)]
-        times = {}
+        paths = [Path(0, v1), Path(1, v2_a, v2_b), Path(2, v3_a, v3_b)]
+        impossible_paths = []
 
         for j, path in enumerate(paths):
+            impossible_path = False
             for k, vector in enumerate(path.get_vectors()):
-                logging.info('Vector {}: {}'.format(k, vector))
-                apparent_wind_angle = angle_between_angles(wind_direction, vector.get_angle_degrees())
-                logging.info('Real wind speed: {:.2f} m/s / {:.2f} kn'.format(wind_speed, ms_to_kn(wind_speed)))
-                logging.info('Real wind angle: {:.2f}°'.format(wind_direction))
-                logging.info('Boat angle: {:.2f}°'.format(vector.get_angle_degrees()))
-                logging.info('Apparent wind angle: {:.2f}°'.format(apparent_wind_angle))
-                nearest_wind_speed = float(get_nearest_value(wind['wind'], ms_to_kn(wind_speed)))
-                boat_angle = get_nearest_value(wind['wind'][str(nearest_wind_speed)], apparent_wind_angle)
-                boat_speed = wind['wind'][str(nearest_wind_speed)][boat_angle]
-                boat_angle = float(boat_angle)
-                logging.info('Boat speed {:.2f} m/s / {:.2f} kn'
-                             .format(kn_to_ms(boat_speed), boat_speed))
-                logging.info('Boat angle: {:.2f}°'.format(boat_angle))
-                path.add_length(vector.get_length())
-                path.add_time(vector.get_length() / boat_speed)
-                times[j] = path.get_time()
+                if not impossible_path:
+                    logging.info('Vector {}: {}'.format(k, vector))
+                    apparent_wind_angle = angle_between_angles(wind_direction, vector.get_angle_degrees())
+                    if apparent_wind_angle < WIND_ANGLE_THRESHOLD_DEGREE:
+                        logging.info('Path {}: {} has an impossible angle in Vector: {} {} with {}°'
+                                     .format(path.get_index(), path, k, vector, round(apparent_wind_angle, 2)))
+                        impossible_path = True
+                        impossible_paths.append(j)
+                    else:
+                        logging.info('Real wind speed: {:.2f} m/s / {:.2f} kn'.format(wind_speed, ms_to_kn(wind_speed)))
+                        logging.info('Real wind angle: {:.2f}°'.format(wind_direction))
+                        logging.info('Boat angle: {:.2f}°'.format(vector.get_angle_degrees()))
+                        logging.info('Apparent wind angle: {:.2f}°'.format(apparent_wind_angle))
+                        nearest_wind_speed = float(get_nearest_value(wind['wind'], ms_to_kn(wind_speed)))
+                        boat_angle = get_nearest_value(wind['wind'][str(nearest_wind_speed)], apparent_wind_angle)
+                        boat_speed = wind['wind'][str(nearest_wind_speed)][boat_angle]
+                        boat_angle = float(boat_angle)
+                        logging.info('Boat speed {:.2f} m/s / {:.2f} kn'
+                                     .format(kn_to_ms(boat_speed), boat_speed))
+                        logging.info('Boat angle: {:.2f}°'.format(boat_angle))
+                        path.add_length(vector.get_length())
+                        path.add_time(vector.get_length() / boat_speed)
 
             logging.info('Path {}: {}'.format(j, path))
 
-        shortest_path_index = min(times, key=times.get)
-        logging.info('Shortest path by time is Path {}: {}'.format(shortest_path_index, paths[shortest_path_index]))
+        for path in sorted(impossible_paths, reverse=True):
+            del paths[path]
+
+        shortest_path = min(paths, key=lambda p: p.get_time())
+        logging.info('Shortest path by time is Path {}: {}'.format(shortest_path.get_index(), shortest_path))
 
         break
 
