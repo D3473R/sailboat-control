@@ -12,7 +12,13 @@ import numpy as np
 import paho.mqtt.client as mqtt
 from geographiclib.geodesic import Geodesic
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)-5.5s]  %(message)s',
+    handlers=[
+        logging.FileHandler('{0}/{1}.log'.format('../logs', 'sailboat-control'), 'a', 'utf-8'),
+        logging.StreamHandler()
+    ])
 
 MS_KN = 1.944
 WIND_ANGLE_THRESHOLD_DEGREE = 15
