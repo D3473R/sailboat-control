@@ -3,7 +3,6 @@
 
 import json
 import logging
-import sys
 
 import geojson
 import math
@@ -171,11 +170,7 @@ def main():
         v3_b = Vector(math.radians(angle_between_angles(90, math.degrees(math.atan(v2_b.get_length() / v3_a.get_length())))), median(v1.get_length(), v2_b.get_length(), v2_a.get_length()))
 
         paths = [Path(v1), Path(v2_a, v2_b), Path(v3_a, v3_b)]
-        max_path = Path()
-        max_path.add_time(sys.maxsize)
-        max_path.add_length(sys.maxsize)
-
-        shortest_path_by_time = max_path
+        times = {}
 
         for j, path in enumerate(paths):
             for k, vector in enumerate(path.get_vectors()):
@@ -185,21 +180,21 @@ def main():
                 logging.info('Real wind angle: {:.2f}°'.format(wind_direction))
                 logging.info('Boat angle: {:.2f}°'.format(vector.get_angle_degrees()))
                 logging.info('Apparent wind angle: {:.2f}°'.format(apparent_wind_angle))
-                boat_speed = float(get_nearest_value(wind['wind'], ms_to_kn(wind_speed)))
-                boat_angle = float(
-                    get_nearest_value(wind['wind'][str(boat_speed)], apparent_wind_angle))
+                nearest_wind_speed = float(get_nearest_value(wind['wind'], ms_to_kn(wind_speed)))
+                boat_angle = get_nearest_value(wind['wind'][str(nearest_wind_speed)], apparent_wind_angle)
+                boat_speed = wind['wind'][str(nearest_wind_speed)][boat_angle]
+                boat_angle = float(boat_angle)
                 logging.info('Boat speed {:.2f} m/s / {:.2f} kn'
                              .format(kn_to_ms(boat_speed), boat_speed))
                 logging.info('Boat angle: {:.2f}°'.format(boat_angle))
                 path.add_length(vector.get_length())
                 path.add_time(vector.get_length() / boat_speed)
+                times[j] = path.get_time()
 
             logging.info('Path {}: {}'.format(j, path))
 
-            if path.get_time() < shortest_path_by_time.get_length():
-                shortest_path_by_time = path
-
-        logging.info('Shortest path by time: {}'.format(shortest_path_by_time))
+        shortest_path_index = min(times, key=times.get)
+        logging.info('Shortest path by time is Path {}: {}'.format(shortest_path_index, paths[shortest_path_index]))
 
         break
 
