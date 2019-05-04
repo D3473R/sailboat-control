@@ -3,6 +3,8 @@
 
 import json
 import logging
+import time
+from timeit import default_timer as timer
 
 import geojson
 import math
@@ -14,10 +16,16 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
 
 MS_KN = 1.944
 WIND_ANGLE_THRESHOLD_DEGREE = 15
+TARGET_RADIUS = 5
+PATH_CALCULATION_ITERATIONS = 4
+PATH_CALCULATION_TIMEOUT = 0.5
 
 wind_direction = 0
 wind_speed = 7.71604938271605
 wind_data = False
+
+with open('wind.json') as g:
+    wind = json.load(g)
 
 
 def on_connect(client, userdata, flags, rc):
@@ -67,6 +75,14 @@ def ms_to_kn(ms):
     return ms * MS_KN
 
 
+def get_opposite_angle(hypotenuse, cathetus):
+    return math.asin(cathetus / hypotenuse)
+
+
+def get_adjacent_angle(hypotenuse, cathetus):
+    return math.acos(cathetus / hypotenuse)
+
+
 class Vector:
     __vector = None
 
@@ -76,7 +92,11 @@ class Vector:
     def get_angle(self):
         v1 = self.__vector
         v2 = np.array([1, 0])
-        return np.arccos(np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2)))
+        angle = np.linalg.norm(v1) * np.linalg.norm(v2)
+        return np.arccos(np.dot(v1, v2) / angle) if angle > 0 else 0
+
+    def get_vector(self):
+        return self.__vector
 
     def set_angle(self, angle):
         self.__init__(angle, self.get_length())
@@ -93,14 +113,14 @@ class Vector:
     def get_adjacent_len(self):
         return math.fabs(math.cos(self.get_angle()) * self.get_length())
 
-    def get_adjacent_angle(self, cathetus):
-        return math.acos(math.radians(cathetus.get_length() / self.get_length()))
-
     def get_opposite_len(self):
         return math.fabs(math.sin(self.get_angle()) * self.get_length())
 
-    def get_opposite_angle(self, cathetus):
-        return math.asin(math.radians(cathetus.get_length() / self.get_length()))
+    def x(self):
+        return self.__vector.item(0)
+
+    def y(self):
+        return self.__vector.item(1)
 
     def __repr__(self):
         return json.dumps({'vector': '[{:.2f}, {:.2f}]'.format(self.__vector[0], self.__vector[1])})
@@ -115,8 +135,41 @@ class Path:
         self.__index = index
         self.__vectors = list(vectors)
 
+    def calculate_vectors(self):
+        impossible_path = False
+
+        for k, vector in enumerate(self.__vectors):
+            if not impossible_path:
+                logging.info('Vector {}: {}'.format(k, vector))
+                apparent_wind_angle = angle_between_angles(wind_direction, vector.get_angle_degrees())
+                if apparent_wind_angle < WIND_ANGLE_THRESHOLD_DEGREE:
+                    logging.info('Path {}: {} has an impossible angle in Vector: {} {} with {:.2f}°'
+                                 .format(self.__index, self, k, vector, apparent_wind_angle))
+                    impossible_path = True
+                else:
+                    logging.info('Real wind speed: {:.2f} m/s / {:.2f} kn'.format(wind_speed, ms_to_kn(wind_speed)))
+                    logging.info('Real wind angle: {:.2f}°'.format(wind_direction))
+                    logging.info('Boat angle: {:.2f}°'.format(vector.get_angle_degrees()))
+                    logging.info('Apparent wind angle: {:.2f}°'.format(apparent_wind_angle))
+                    nearest_wind_speed = float(get_nearest_value(wind['wind'], ms_to_kn(wind_speed)))
+                    boat_angle = get_nearest_value(wind['wind'][str(nearest_wind_speed)], apparent_wind_angle)
+                    boat_speed = wind['wind'][str(nearest_wind_speed)][boat_angle]
+                    boat_angle = float(boat_angle)
+                    logging.info('Boat speed {:.2f} m/s / {:.2f} kn'
+                                 .format(kn_to_ms(boat_speed), boat_speed))
+                    logging.info('Boat angle: {:.2f}°'.format(boat_angle))
+                    self.add_length(vector.get_length())
+                    self.add_time(vector.get_length() / boat_speed)
+        return impossible_path
+
     def get_vectors(self):
         return self.__vectors
+
+    def set_vector(self, index, vector):
+        self.__vectors[index] = vector
+
+    def add_vector_prefix(self, vector_prefix):
+        self.__vectors.insert(0, vector_prefix)
 
     def get_length(self):
         return self.__length
@@ -139,15 +192,97 @@ class Path:
                       'vectors': json.loads(str(self.__vectors))}})
 
 
+def calculate_initial_paths(target_angle, target_distance):
+    v1 = Vector(math.radians(target_angle), target_distance)
+    v2_a = Vector(math.radians(90), v1.get_opposite_len())
+    v2_b = Vector(math.radians(0), v1.get_adjacent_len())
+    v3_a = Vector(math.radians(90), v2_a.get_length() / 2)
+    angle = math.degrees(math.atan(v2_b.get_length() / v3_a.get_length())) if v3_a.get_length() > 0 else 0
+    v3_b = Vector(
+        math.radians(angle_between_angles(90, angle)),
+        median(v1.get_length(), v2_b.get_length(), v2_a.get_length()))
+
+    return [Path(0, v1), Path(1, v2_a, v2_b), Path(2, v3_a, v3_b)]
+
+
+def calculate_paths(v1, v2, v3):
+    v2_a = v2
+    v2_b = v3
+
+    v3_a = Vector(math.radians(90), v2_a.get_length() / 2)
+    v3_b_l = median(v1.get_length(), v2_b.get_length(), v2_a.get_length())
+    v3_b_a = math.degrees(angle_between_vectors(v2.get_vector(), np.array([v1.x(), np.subtract(v1.y(), v2.y() / 2.0)])))
+    v3_b = Vector(math.radians(angle_between_angles(90, v3_b_a)), v3_b_l)
+
+    return [Path(0, v1), Path(1, v2_a, v2_b), Path(2, v3_a, v3_b)]
+
+
+def calculate_best_path(paths, increments):
+    vector_prefix = np.array([0, 0])
+
+    for x in range(increments):
+        logging.info('Starting iteration: {}'.format(x + 1))
+        impossible_paths = []
+
+        for j, path in enumerate(paths):
+            if path.calculate_vectors():
+                impossible_paths.append(j)
+
+            logging.info('Path {}: {}'.format(j, path))
+
+        for path in sorted(impossible_paths, reverse=True):
+            del paths[path]
+
+        paths.sort(key=lambda p: p.get_time())
+
+        if len(paths) == 0:
+            logging.info('No suitable path found. Target is directly in the wind')
+            paths.append(Path(0, Vector(math.radians(45), 1)))
+        if len(paths) == 1:
+            return paths[0]
+        logging.info('Sorted paths by time: {}'.format(paths))
+
+        if x + 1 < increments:
+            if paths[0].get_index() == 0 or paths[1].get_index() == 0:
+                p1, p2 = (paths[0], paths[1]) if paths[0].get_index() == 0 else (paths[1], paths[0])
+                v1 = p1.get_vectors()[0]
+                v2 = p2.get_vectors()[0]
+                v3 = p2.get_vectors()[1]
+
+                paths = calculate_paths(v1, v2, v3)
+            elif paths[0].get_index() == 1 or paths[1].get_index() == 1:
+                p1, p2 = (paths[0], paths[1]) if paths[0].get_index() == 0 else (paths[1], paths[0])
+                v1 = p1.get_vectors()[1]
+                v2 = p1.get_vectors()[0]
+                v3 = p2.get_vectors()[1]
+
+                vector_prefix = np.add(vector_prefix, v2.get_vector())
+
+                paths = calculate_paths(v1, v2, v3)
+
+    best_path = paths[0]
+
+    if np.any(vector_prefix):
+        first_vector = best_path.get_vectors()[0].get_vector()
+        if angle_between_vectors(first_vector, vector_prefix) == 0.0:
+            best_path.set_vector(0, Vector(math.radians(90), np.linalg.norm(np.add(first_vector, vector_prefix))))
+        else:
+            best_path.add_vector_prefix(Vector(math.radians(90), np.linalg.norm(vector_prefix)))
+        logging.info('Updating the best path with the prefix vector')
+        best_path.calculate_vectors()
+
+    return best_path
+
+
 def main():
     client = mqtt.Client()
     client.on_connect = on_connect
     client.on_disconnect = on_disconnect
     client.on_message = on_message
 
-    client.connect("localhost", 1883, 60)
+    # client.connect("localhost", 1883, 60)
 
-    client.loop_start()
+    # client.loop_start()
 
     # while not wind_data:
     # pass
@@ -157,69 +292,30 @@ def main():
     with open('waypoints.json') as f:
         waypoints = geojson.load(f)
 
-    with open('wind.json') as g:
-        wind = json.load(g)
-
     cyclic = waypoints['properties']['cyclic']
     logging.info('Waypoints: %s' % waypoints)
     logging.info('Number of coordinates: %d, Cyclic: %s' % (len(waypoints['geometry']['coordinates']), cyclic))
 
-    for i, waypoint in enumerate(waypoints['geometry']['coordinates']):
-        logging.info('Using waypoint %i: %s' % (i, waypoint))
-        geodesic = Geodesic.WGS84.Inverse(gps[1], gps[0], waypoint[1], waypoint[0])
-        geodesic['s12'] = 10.816653826392
-        geodesic['azi1'] = 56.3099324740202
+    while True:
+        for i, waypoint in enumerate(waypoints['geometry']['coordinates']):
+            logging.info('Using waypoint %i: %s' % (i, waypoint))
+            geodesic = Geodesic.WGS84.Inverse(gps[1], gps[0], waypoint[1], waypoint[0])
 
-        v1 = Vector(math.radians(angle_between_angles(90, geodesic['azi1'])), geodesic['s12'])
-        v2_a = Vector(math.radians(90), v1.get_opposite_len())
-        v2_b = Vector(v1.get_opposite_angle(v2_a), v1.get_adjacent_len())
-        v3_a = Vector(math.radians(90), v2_a.get_length() / 2)
-        v3_b = Vector(
-            math.radians(angle_between_angles(90, math.degrees(math.atan(v2_b.get_length() / v3_a.get_length())))),
-            median(v1.get_length(), v2_b.get_length(), v2_a.get_length()))
+            while geodesic['s12'] > TARGET_RADIUS:
+                geodesic = Geodesic.WGS84.Inverse(gps[1], gps[0], waypoint[1], waypoint[0])
 
-        paths = [Path(0, v1), Path(1, v2_a, v2_b), Path(2, v3_a, v3_b)]
-        impossible_paths = []
-
-        for j, path in enumerate(paths):
-            impossible_path = False
-            for k, vector in enumerate(path.get_vectors()):
-                if not impossible_path:
-                    logging.info('Vector {}: {}'.format(k, vector))
-                    apparent_wind_angle = angle_between_angles(wind_direction, vector.get_angle_degrees())
-                    if apparent_wind_angle < WIND_ANGLE_THRESHOLD_DEGREE:
-                        logging.info('Path {}: {} has an impossible angle in Vector: {} {} with {:.2f}°'
-                                     .format(path.get_index(), path, k, vector, apparent_wind_angle))
-                        impossible_path = True
-                        impossible_paths.append(j)
-                    else:
-                        logging.info('Real wind speed: {:.2f} m/s / {:.2f} kn'.format(wind_speed, ms_to_kn(wind_speed)))
-                        logging.info('Real wind angle: {:.2f}°'.format(wind_direction))
-                        logging.info('Boat angle: {:.2f}°'.format(vector.get_angle_degrees()))
-                        logging.info('Apparent wind angle: {:.2f}°'.format(apparent_wind_angle))
-                        nearest_wind_speed = float(get_nearest_value(wind['wind'], ms_to_kn(wind_speed)))
-                        boat_angle = get_nearest_value(wind['wind'][str(nearest_wind_speed)], apparent_wind_angle)
-                        boat_speed = wind['wind'][str(nearest_wind_speed)][boat_angle]
-                        boat_angle = float(boat_angle)
-                        logging.info('Boat speed {:.2f} m/s / {:.2f} kn'
-                                     .format(kn_to_ms(boat_speed), boat_speed))
-                        logging.info('Boat angle: {:.2f}°'.format(boat_angle))
-                        path.add_length(vector.get_length())
-                        path.add_time(vector.get_length() / boat_speed)
-
-            logging.info('Path {}: {}'.format(j, path))
-
-        for path in sorted(impossible_paths, reverse=True):
-            del paths[path]
-
-        shortest_path = min(paths, key=lambda p: p.get_time())
-        logging.info('Shortest path by time is Path {}: {}'.format(shortest_path.get_index(), shortest_path))
-
-        break
-
-    # while True:
-    # pass
+                paths = calculate_initial_paths(angle_between_angles(90, geodesic['azi1']), geodesic['s12'])
+                best_path = calculate_best_path(paths, PATH_CALCULATION_ITERATIONS)
+                logging.info('Best path is {}'.format(best_path))
+                time.sleep(PATH_CALCULATION_TIMEOUT)
+        if cyclic:
+            logging.info('Start new cycle')
+        else:
+            break
 
 
 if __name__ == '__main__':
+    start = timer()
     main()
+    end = timer()
+    logging.info('Execution time: {:.2f} sec'.format(end - start))
