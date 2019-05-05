@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# coding: utf-8
+# -*- coding: utf-8 -*-
 
 import json
 import logging
@@ -11,6 +11,8 @@ import math
 import numpy as np
 import paho.mqtt.client as mqtt
 from geographiclib.geodesic import Geodesic
+
+from sailboatcontrol import helpers
 
 logging.basicConfig(
     level=logging.INFO,
@@ -26,13 +28,14 @@ TARGET_RADIUS = 5
 PATH_CALCULATION_ITERATIONS = 4
 PATH_CALCULATION_TIMEOUT = 0.5
 
-wind_direction = 0
+wind_direction = 90
 wind_speed = 7.71604938271605
 wind_data = False
 
 boat_heading = 0
+boat_speed = 0
 
-with open('wind.json') as g:
+with open('../json/wind.json') as g:
     wind = json.load(g)
 
 
@@ -96,6 +99,13 @@ class Vector:
 
     def __init__(self, angle, length):
         self.__vector = np.array([np.cos(angle), np.sin(angle)]) * length
+
+    @staticmethod
+    def from_vector(vector):
+        vector_length = np.linalg.norm(vector)
+        v2 = np.array([1, 0])
+        angle = vector_length * np.linalg.norm(v2)
+        return Vector(np.arccos(np.dot(vector, v2) / angle), vector_length)
 
     def get_angle(self):
         v1 = self.__vector
@@ -300,7 +310,7 @@ def main():
 
     gps = [19.953566, 60.10242]
 
-    with open('waypoints.json') as f:
+    with open('../json/waypoints.json') as f:
         waypoints = geojson.load(f)
 
     cyclic = waypoints['properties']['cyclic']
@@ -322,11 +332,22 @@ def main():
                 heading_delta = angle_between_angles(boat_heading, best_path.get_heading())
                 logging.info('Heading delta is: {:.2f}°'.format(heading_delta))
 
-                degree_range = -360 - 360
-                servo_range = 450 - 220
+                rudder_servo_value = helpers.map_rudder_servo(heading_delta)
 
-                rudder_value = (heading_delta - 360) * servo_range / degree_range + 220
-                logging.info('Rudder value is: {:.2f}'.format(rudder_value))
+                logging.info('Rudder servo value is: {:.2f}'.format(rudder_servo_value))
+
+                real_wind_vector = Vector(math.radians(wind_direction), wind_speed)
+                boat_vector = Vector(math.radians(boat_heading), boat_speed)
+                apparent_wind_vector = Vector.from_vector(
+                    np.subtract(real_wind_vector.get_vector(), boat_vector.get_vector()))
+
+                sail_angle = helpers.get_sail_angle(math.degrees(apparent_wind_vector.get_angle()))
+
+                logging.info('Sail angle is: {:.2f}°'.format(sail_angle))
+
+                sail_servo_value = helpers.map_sail_servo(sail_angle)
+
+                logging.info('Sail servo value is: {:.2f}'.format(sail_servo_value))
 
                 time.sleep(PATH_CALCULATION_TIMEOUT)
         if cyclic:

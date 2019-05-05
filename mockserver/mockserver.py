@@ -22,13 +22,18 @@ def knots_to_ms(knots):
     return knots / 1.944
 
 
-client = mqtt.Client()
-client.on_connect = on_connect
+def main():
+    client = mqtt.Client()
+    client.on_connect = on_connect
 
-client.connect("localhost", 1883, 60)
+    client.connect("localhost", 1883, 60)
 
-client.loop_start()
+    client.loop_start()
 
-while True:
-    time.sleep(1)
-    client.publish("weather", build_json_package(WIND_DIRECTION_DEGREE, knots_to_ms(WIND_SPEED_MS), ))
+    while True:
+        time.sleep(1)
+        client.publish("weather", build_json_package(WIND_DIRECTION_DEGREE, knots_to_ms(WIND_SPEED_MS)))
+
+
+if __name__ == '__main__':
+    main()
