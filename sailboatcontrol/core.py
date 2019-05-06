@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+import os
 import json
 import logging
 import time
@@ -12,7 +13,13 @@ import numpy as np
 import paho.mqtt.client as mqtt
 from geographiclib.geodesic import Geodesic
 
-from sailboatcontrol import helpers
+try:
+    from sailboatcontrol import helpers
+except ModuleNotFoundError as e:
+    import helpers
+
+abspath = os.path.abspath(__file__)
+os.chdir(os.path.dirname(abspath))
 
 logging.basicConfig(
     level=logging.INFO,
