@@ -20,7 +20,7 @@ from geographiclib.geodesic import Geodesic
 
 try:
     from sailboatcontrol import helpers
-except ModuleNotFoundError as e:
+except ImportError as e:
     import helpers
 
 abspath = os.path.abspath(__file__)
@@ -32,7 +32,8 @@ logging.basicConfig(
     handlers=[
         logging.FileHandler('{0}/{1}.log'.format('../logs', 'sailboat-control'), 'a', 'utf-8'),
         logging.StreamHandler()
-    ])
+    ]
+)
 
 BNO_SERIAL_PORT = '/dev/serial0'
 GPS_SERIAL_PORT = '/dev/ttyACM0'
@@ -59,7 +60,7 @@ def gps_sensor(s):
     while True:
         line = s.readline().decode('ASCII')
         msg = pynmea2.parse(line)
-        if msg.sentence_type == 'RMC':
+        if msg.sentence_type == 'RMC' and msg.status == 'A':
             gps['status'] = msg.status
             gps['lon'] = msg.longitude
             gps['lat'] = msg.latitude
@@ -351,8 +352,14 @@ def main():
     gps_thread.start()
 
     bno_serial = BNO055.BNO055(serial_port=BNO_SERIAL_PORT, rst=18)
-    if not bno_serial.begin():
-        raise RuntimeError('Failed to initialize BNO055! Is the sensor connected?')
+    while True:
+        try:
+            if not bno_serial.begin():
+                raise RuntimeError('Failed to initialize BNO055! Is the sensor connected?')
+            break
+        except RuntimeError:
+            logging.warning('Got BNO Error, waiting one second...')
+            time.sleep(1)
 
     bno_thread = threading.Thread(target=bno_sensor, args=(bno_serial,))
     bno_thread.start()

@@ -14,6 +14,7 @@ geographiclib = "*"
 adafruit-bno055 = "*"
 adafruit-pca9685 = "*"
 pynmea2 = "*"
+"rpi.gpio" = "*"
 
 [requires]
 python_version = "3.7"
