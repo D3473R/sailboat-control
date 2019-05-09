@@ -11,6 +11,9 @@ paho-mqtt = "*"
 geojson = "*"
 numpy = "*"
 geographiclib = "*"
+adafruit-bno055 = "*"
+adafruit-pca9685 = "*"
+pynmea2 = "*"
 
 [requires]
 python_version = "3.7"

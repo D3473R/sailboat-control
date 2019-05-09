@@ -1,7 +1,7 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "62d254c6629d63c8533ca8d631e5d83ba9528b6dedd1e3c8a5904a6115de089a"
+            "sha256": "eaf9e1ae71fa07152082e3b9b8597ed0e4ad475903ed91ab37470b15265c76da"
         },
         "pipfile-spec": 6,
         "requires": {
@@ -16,10 +16,37 @@
         ]
     },
     "default": {
+        "adafruit-bno055": {
+            "hashes": [
+                "sha256:6a3848cda6a0a28f6b07f8c4ccae76f521d0d66d82e58971584947edc4bcf96d",
+                "sha256:e5edec219932d33720ce078a6e6ac9736ba80e85b769f6e4ed3c33e2214ffd64"
+            ],
+            "index": "pypi",
+            "version": "==1.0.2"
+        },
+        "adafruit-gpio": {
+            "hashes": [
+                "sha256:d6465b92c866c51ca8f3bc1e8f2ec36f5ccdb46d0fd54101c1109756d4a2dcd0"
+            ],
+            "version": "==1.0.3"
+        },
+        "adafruit-pca9685": {
+            "hashes": [
+                "sha256:24d632c912a23f44416369555f3f39f2509975b89d37955f125bc009040a1dfd",
+                "sha256:24d9c8c1fd17093d3255823c5b43f7dccd0b95a042d663832af473507f188ea9"
+            ],
+            "index": "pypi",
+            "version": "==1.0.1"
+        },
+        "adafruit-pureio": {
+            "hashes": [
+                "sha256:e65cd929f1d8e109513ed1e457c2742bf4f15349c1a9b7f5b1e04191624d7488"
+            ],
+            "version": "==0.2.3"
+        },
         "geographiclib": {
             "hashes": [
-                "sha256:635da648fce80a57b81b28875d103dacf7deb12a3f5f7387ba7d39c51e096533",
-                "sha256:a76a10379e30623af0d6551ab38688649b813fb427b037618ca50d575e242bfa"
+                "sha256:635da648fce80a57b81b28875d103dacf7deb12a3f5f7387ba7d39c51e096533"
             ],
             "index": "pypi",
             "version": "==1.49"
@@ -67,6 +94,21 @@
             ],
             "index": "pypi",
             "version": "==1.4.0"
+        },
+        "pynmea2": {
+            "hashes": [
+                "sha256:8b83fa7e3e668af5e182ef1c2fd4a535433ecadf60d7b627280172d695a1646b",
+                "sha256:fe786594299588d1bfbd346ece2c2c1e5b24e160dcb740813c34bfa70d0a141d"
+            ],
+            "index": "pypi",
+            "version": "==1.15.0"
+        },
+        "pyserial": {
+            "hashes": [
+                "sha256:6e2d401fdee0eab996cf734e67773a0143b932772ca8b42451440cfed942c627",
+                "sha256:e0770fadba80c31013896c7e6ef703f72e7834965954a78e71a3049488d4d7d8"
+            ],
+            "version": "==3.4"
         }
     },
     "develop": {

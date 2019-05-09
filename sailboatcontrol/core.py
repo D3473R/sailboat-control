@@ -1,9 +1,10 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-import os
 import json
 import logging
+import os
+import threading
 import time
 from timeit import default_timer as timer
 
@@ -11,6 +12,10 @@ import geojson
 import math
 import numpy as np
 import paho.mqtt.client as mqtt
+import pynmea2
+import serial
+from Adafruit_BNO055 import BNO055
+from Adafruit_PCA9685 import PCA9685
 from geographiclib.geodesic import Geodesic
 
 try:
@@ -29,6 +34,8 @@ logging.basicConfig(
         logging.StreamHandler()
     ])
 
+BNO_SERIAL_PORT = '/dev/serial0'
+GPS_SERIAL_PORT = '/dev/ttyACM0'
 MS_KN = 1.944
 WIND_ANGLE_THRESHOLD_DEGREE = 15
 TARGET_RADIUS = 5
@@ -40,10 +47,31 @@ wind_speed = 7.71604938271605
 wind_data = False
 
 boat_heading = 0
-boat_speed = 0
+
+gps = {'lon': 0.0, 'lat': 0.0, 'speed': 0.0, 'status': 'V'}
 
 with open('../json/wind.json') as g:
     wind = json.load(g)
+
+
+def gps_sensor(s):
+    global gps
+    while True:
+        line = s.readline().decode('ASCII')
+        msg = pynmea2.parse(line)
+        if msg.sentence_type == 'RMC':
+            gps['status'] = msg.status
+            gps['lon'] = msg.longitude
+            gps['lat'] = msg.latitude
+            gps['speed'] = kn_to_ms(msg.spd_over_grnd)
+
+
+def bno_sensor(bno):
+    global boat_heading
+    while True:
+        heading, roll, pitch = bno.read_euler()
+        boat_heading = heading
+        time.sleep(0.1)
 
 
 def on_connect(client, userdata, flags, rc):
@@ -179,12 +207,12 @@ class Path:
                     nearest_wind_speed = float(get_nearest_value(wind['wind'], ms_to_kn(wind_speed)))
                     boat_angle = get_nearest_value(wind['wind'][str(nearest_wind_speed)], apparent_wind_angle)
                     boat_speed = wind['wind'][str(nearest_wind_speed)][boat_angle]
+                    boat_speed_ms = kn_to_ms(boat_speed)
                     boat_angle = float(boat_angle)
-                    logging.info('Boat speed {:.2f} m/s / {:.2f} kn'
-                                 .format(kn_to_ms(boat_speed), boat_speed))
+                    logging.info('Boat speed {:.2f} m/s / {:.2f} kn'.format(boat_speed_ms, boat_speed))
                     logging.info('Boat angle: {:.2f}°'.format(boat_angle))
                     self.add_length(vector.get_length())
-                    self.add_time(vector.get_length() / boat_speed)
+                    self.add_time(vector.get_length() / boat_speed_ms)
         return impossible_path
 
     def get_heading(self):
@@ -315,7 +343,19 @@ def main():
     # while not wind_data:
     # pass
 
-    gps = [19.953566, 60.10242]
+    servo_pwm = PCA9685()
+    servo_pwm.set_pwm_freq(60)
+
+    gps_serial = serial.Serial(GPS_SERIAL_PORT, timeout=5.0)
+    gps_thread = threading.Thread(target=gps_sensor, args=(gps_serial,))
+    gps_thread.start()
+
+    bno_serial = BNO055.BNO055(serial_port=BNO_SERIAL_PORT, rst=18)
+    if not bno_serial.begin():
+        raise RuntimeError('Failed to initialize BNO055! Is the sensor connected?')
+
+    bno_thread = threading.Thread(target=bno_sensor, args=(bno_serial,))
+    bno_thread.start()
 
     with open('../json/waypoints.json') as f:
         waypoints = geojson.load(f)
@@ -324,13 +364,18 @@ def main():
     logging.info('Waypoints: %s' % waypoints)
     logging.info('Number of coordinates: %d, Cyclic: %s' % (len(waypoints['geometry']['coordinates']), cyclic))
 
+    while gps['status'] != 'A':
+        logging.info('Waiting for gps...')
+        time.sleep(0.2)
+
     while True:
         for i, waypoint in enumerate(waypoints['geometry']['coordinates']):
             logging.info('Using waypoint %i: %s' % (i, waypoint))
-            geodesic = Geodesic.WGS84.Inverse(gps[1], gps[0], waypoint[1], waypoint[0])
+            geodesic = Geodesic.WGS84.Inverse(gps['lat'], gps['lon'], waypoint[1], waypoint[0])
 
             while geodesic['s12'] > TARGET_RADIUS:
-                geodesic = Geodesic.WGS84.Inverse(gps[1], gps[0], waypoint[1], waypoint[0])
+                logging.info('Boat gps: %s' % gps)
+                geodesic = Geodesic.WGS84.Inverse(gps['lat'], gps['lon'], waypoint[1], waypoint[0])
 
                 paths = calculate_initial_paths(angle_between_angles(90, geodesic['azi1']), geodesic['s12'])
                 best_path = calculate_best_path(paths, PATH_CALCULATION_ITERATIONS)
@@ -342,9 +387,10 @@ def main():
                 rudder_servo_value = helpers.map_rudder_servo(heading_delta)
 
                 logging.info('Rudder servo value is: {:.2f}'.format(rudder_servo_value))
+                servo_pwm.set_pwm(0, 0, rudder_servo_value)
 
                 real_wind_vector = Vector(math.radians(wind_direction), wind_speed)
-                boat_vector = Vector(math.radians(boat_heading), boat_speed)
+                boat_vector = Vector(math.radians(boat_heading), gps['speed'])
                 apparent_wind_vector = Vector.from_vector(
                     np.subtract(real_wind_vector.get_vector(), boat_vector.get_vector()))
 
@@ -355,6 +401,7 @@ def main():
                 sail_servo_value = helpers.map_sail_servo(sail_angle)
 
                 logging.info('Sail servo value is: {:.2f}'.format(sail_servo_value))
+                servo_pwm.set_pwm(1, 0, sail_servo_value)
 
                 time.sleep(PATH_CALCULATION_TIMEOUT)
         if cyclic:
