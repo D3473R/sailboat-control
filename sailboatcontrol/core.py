@@ -87,11 +87,10 @@ def on_disconnect(client, userdata, rc=0):
 
 def on_message(client, userdata, msg):
     global wind_direction, wind_speed, wind_data
-    msg = json.loads(msg.payload)
+    msg = json.loads(msg.payload.decode('ASCII'))
     wind_direction = msg['direction']
     wind_speed = msg['speed']
     wind_data = True
-    logging.info(msg)
 
 
 def unit_vector(angle):
@@ -337,12 +336,13 @@ def main():
     client.on_disconnect = on_disconnect
     client.on_message = on_message
 
-    # client.connect("localhost", 1883, 60)
+    client.connect("192.168.137.219", 1883, 60)
 
-    # client.loop_start()
+    client.loop_start()
 
-    # while not wind_data:
-    # pass
+    while not wind_data:
+        logging.info('Waiting for wind data... {}'.format(wind_speed))
+        time.sleep(1)
 
     servo_pwm = PCA9685()
     servo_pwm.set_pwm_freq(60)
