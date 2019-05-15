@@ -6,7 +6,6 @@ import logging
 import os
 import threading
 import time
-from timeit import default_timer as timer
 
 import geojson
 import math
@@ -40,8 +39,10 @@ GPS_SERIAL_PORT = '/dev/ttyACM0'
 MS_KN = 1.944
 WIND_ANGLE_THRESHOLD_DEGREE = 15
 TARGET_RADIUS = 5
-PATH_CALCULATION_ITERATIONS = 4
-PATH_CALCULATION_TIMEOUT = 0.5
+PATH_CALCULATION_ITERATIONS = 1
+PATH_CALCULATION_TIMEOUT = 4
+
+DEBUG = True
 
 wind_direction = 90
 wind_speed = 7.71604938271605
@@ -49,15 +50,18 @@ wind_data = False
 
 boat_heading = 0
 
+gps_thread_stop = threading.Event()
+bno_thread_stop = threading.Event()
+
 gps = {'lon': 0.0, 'lat': 0.0, 'speed': 0.0, 'status': 'V'}
 
 with open('../json/wind.json') as g:
     wind = json.load(g)
 
 
-def gps_sensor(s):
+def gps_sensor(s, stop_event):
     global gps
-    while True:
+    while not stop_event.is_set():
         line = s.readline().decode('ASCII')
         msg = pynmea2.parse(line)
         if msg.sentence_type == 'RMC' and msg.status == 'A':
@@ -67,11 +71,11 @@ def gps_sensor(s):
             gps['speed'] = kn_to_ms(msg.spd_over_grnd)
 
 
-def bno_sensor(bno):
+def bno_sensor(bno, stop_event):
     global boat_heading
-    while True:
+    while not stop_event.is_set():
         heading, roll, pitch = bno.read_euler()
-        boat_heading = heading
+        boat_heading = (90 - heading) % 360
         time.sleep(0.1)
 
 
@@ -202,15 +206,15 @@ class Path:
                 else:
                     logging.info('Real wind speed: {:.2f} m/s / {:.2f} kn'.format(wind_speed, ms_to_kn(wind_speed)))
                     logging.info('Real wind angle: {:.2f}°'.format(wind_direction))
-                    logging.info('Boat angle: {:.2f}°'.format(vector.get_angle_degrees()))
+                    logging.info('Boat angle on vector: {:.2f}°'.format(vector.get_angle_degrees()))
                     logging.info('Apparent wind angle: {:.2f}°'.format(apparent_wind_angle))
                     nearest_wind_speed = float(get_nearest_value(wind['wind'], ms_to_kn(wind_speed)))
                     boat_angle = get_nearest_value(wind['wind'][str(nearest_wind_speed)], apparent_wind_angle)
                     boat_speed = wind['wind'][str(nearest_wind_speed)][boat_angle]
                     boat_speed_ms = kn_to_ms(boat_speed)
                     boat_angle = float(boat_angle)
-                    logging.info('Boat speed {:.2f} m/s / {:.2f} kn'.format(boat_speed_ms, boat_speed))
-                    logging.info('Boat angle: {:.2f}°'.format(boat_angle))
+                    logging.info('Nearest boat speed on vector {:.2f} m/s / {:.2f} kn'.format(boat_speed_ms, boat_speed))
+                    logging.info('Nearest boat angle on vector: {:.2f}°'.format(boat_angle))
                     self.add_length(vector.get_length())
                     self.add_time(vector.get_length() / boat_speed_ms)
         return impossible_path
@@ -336,9 +340,11 @@ def main():
     client.on_disconnect = on_disconnect
     client.on_message = on_message
 
-    client.connect("192.168.137.219", 1883, 60)
-
-    client.loop_start()
+    if DEBUG:
+        wind_data = True
+    else:
+        client.connect("192.168.137.219", 1883, 60)
+        client.loop_start()
 
     while not wind_data:
         logging.info('Waiting for wind data... {}'.format(wind_speed))
@@ -348,7 +354,7 @@ def main():
     servo_pwm.set_pwm_freq(60)
 
     gps_serial = serial.Serial(GPS_SERIAL_PORT, timeout=5.0)
-    gps_thread = threading.Thread(target=gps_sensor, args=(gps_serial,))
+    gps_thread = threading.Thread(target=gps_sensor, args=(gps_serial, gps_thread_stop))
     gps_thread.start()
 
     bno_serial = BNO055.BNO055(serial_port=BNO_SERIAL_PORT, rst=18)
@@ -361,7 +367,7 @@ def main():
             logging.warning('Got BNO Error, waiting one second...')
             time.sleep(1)
 
-    bno_thread = threading.Thread(target=bno_sensor, args=(bno_serial,))
+    bno_thread = threading.Thread(target=bno_sensor, args=(bno_serial, bno_thread_stop))
     bno_thread.start()
 
     with open('../json/waypoints.json') as f:
@@ -381,12 +387,16 @@ def main():
             geodesic = Geodesic.WGS84.Inverse(gps['lat'], gps['lon'], waypoint[1], waypoint[0])
 
             while geodesic['s12'] > TARGET_RADIUS:
-                logging.info('Boat gps: %s' % gps)
+                logging.info('Boat gps: {}, {}'.format(gps['lat'], gps['lon']))
                 geodesic = Geodesic.WGS84.Inverse(gps['lat'], gps['lon'], waypoint[1], waypoint[0])
 
-                paths = calculate_initial_paths(angle_between_angles(90, geodesic['azi1']), geodesic['s12'])
+                geodesic['azi1'] = (90 - geodesic['azi1']) % 360
+
+                paths = calculate_initial_paths(geodesic['azi1'], geodesic['s12'])
                 best_path = calculate_best_path(paths, PATH_CALCULATION_ITERATIONS)
                 logging.info('Best path is {}'.format(best_path))
+
+                logging.info('Real boat heading is: {}'.format(boat_heading))
 
                 heading_delta = angle_between_angles(boat_heading, best_path.get_heading())
                 logging.info('Heading delta is: {:.2f}°'.format(heading_delta))
@@ -418,7 +428,8 @@ def main():
 
 
 if __name__ == '__main__':
-    start = timer()
-    main()
-    end = timer()
-    logging.info('Execution time: {:.2f} sec'.format(end - start))
+    try:
+        main()
+    except KeyboardInterrupt:
+        gps_thread_stop.set()
+        bno_thread_stop.set()
