@@ -1,29 +1,18 @@
 RUDDER_SERVO_MIN = 220
 RUDDER_SERVO_MAX = 450
 RUDDER_SERVO_MIDDLE = RUDDER_SERVO_MIN + (RUDDER_SERVO_MAX - RUDDER_SERVO_MIN) / 2
-RUDDER_SERVO_RANGE = RUDDER_SERVO_MAX - RUDDER_SERVO_MIN
-RUDDER_SERVO_RANGE_HALF = RUDDER_SERVO_RANGE / 2
 
 SAIL_SERVO_MIN = 250
 SAIL_SERVO_MAX = 500
-SAIL_SERVO_MIDDLE = SAIL_SERVO_MIN + (SAIL_SERVO_MAX - SAIL_SERVO_MIN) / 2
-SAIL_SERVO_RANGE = SAIL_SERVO_MAX - SAIL_SERVO_MIN
-SAIL_SERVO_RANGE_HALF = SAIL_SERVO_RANGE / 2
-
-HEADING_ANGLE_RANGE = 360
-HEADING_ANGLE_RANGE_HALF = HEADING_ANGLE_RANGE / 2
-HEADING_ANGLE_RANGE_QUARTER = HEADING_ANGLE_RANGE_HALF / 2
-
 
 def get_sail_angle(awa):
     """Get the sail angle from an apparent wind angle."""
 
     assert isinstance(awa, float) or isinstance(awa, int)
-    if awa <= HEADING_ANGLE_RANGE_HALF:
-        sail_angle = awa * HEADING_ANGLE_RANGE_QUARTER / HEADING_ANGLE_RANGE_HALF
+    if awa <= 180:
+        sail_angle = awa * 90 / 180
     else:
-        sail_angle = (HEADING_ANGLE_RANGE - awa) \
-                     * HEADING_ANGLE_RANGE_QUARTER / HEADING_ANGLE_RANGE_HALF
+        sail_angle = (360 - awa) * 90 / 180
     return round(sail_angle, 2)
 
 
@@ -32,11 +21,15 @@ def map_rudder_servo(heading_delta):
 
     assert isinstance(heading_delta, float) or isinstance(heading_delta, int)
 
-    if heading_delta <= HEADING_ANGLE_RANGE_HALF:
-        rudder_value = abs(heading_delta * RUDDER_SERVO_RANGE_HALF / HEADING_ANGLE_RANGE_HALF - RUDDER_SERVO_MIDDLE)
+    if heading_delta <= 90:
+        rudder_value = translate(heading_delta, 0, 90, RUDDER_SERVO_MIDDLE, RUDDER_SERVO_MAX)
+    elif heading_delta <= 180:
+        rudder_value = RUDDER_SERVO_MAX
+    elif heading_delta <= 270:
+        rudder_value = RUDDER_SERVO_MIN
     else:
-        rudder_value = abs((heading_delta - HEADING_ANGLE_RANGE_HALF)
-                           * RUDDER_SERVO_RANGE_HALF / HEADING_ANGLE_RANGE_HALF - RUDDER_SERVO_MAX)
+        rudder_value = translate(heading_delta, 270, 360, RUDDER_SERVO_MIN, RUDDER_SERVO_MIDDLE)
+
     return round(rudder_value)
 
 
@@ -45,9 +38,16 @@ def map_sail_servo(sail_angle):
 
     assert isinstance(sail_angle, float) or isinstance(sail_angle, int)
 
-    if sail_angle <= HEADING_ANGLE_RANGE_HALF:
-        sail_value = abs(sail_angle * SAIL_SERVO_RANGE_HALF / HEADING_ANGLE_RANGE_HALF - SAIL_SERVO_MIDDLE)
-    else:
-        sail_value = abs((sail_angle - HEADING_ANGLE_RANGE_HALF)
-                         * SAIL_SERVO_RANGE_HALF / HEADING_ANGLE_RANGE_HALF - SAIL_SERVO_MAX)
+    sail_value = translate(sail_angle, 0, 90, SAIL_SERVO_MAX, SAIL_SERVO_MIN)
     return round(sail_value)
+
+def translate(value, leftMin, leftMax, rightMin, rightMax):
+    # Figure out how 'wide' each range is
+    leftSpan = leftMax - leftMin
+    rightSpan = rightMax - rightMin
+
+    # Convert the left range into a 0-1 range (float)
+    valueScaled = float(value - leftMin) / float(leftSpan)
+
+    # Convert the 0-1 range into a value in the right range.
+    return rightMin + (valueScaled * rightSpan)
