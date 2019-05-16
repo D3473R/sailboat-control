@@ -10,9 +10,9 @@ def get_sail_angle(awa):
 
     assert isinstance(awa, float) or isinstance(awa, int)
     if awa <= 180:
-        sail_angle = awa * 90 / 180
+        sail_angle = awa / 2
     else:
-        sail_angle = (360 - awa) * 90 / 180
+        sail_angle = (360 - awa) / 2
     return round(sail_angle, 2)
 
 

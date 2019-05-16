@@ -411,7 +411,7 @@ def main():
                 apparent_wind_vector = Vector.from_vector(
                     np.subtract(real_wind_vector.get_vector(), boat_vector.get_vector()))
 
-                sail_angle = helpers.get_sail_angle(math.degrees(apparent_wind_vector.get_angle()))
+                sail_angle = helpers.get_sail_angle((apparent_wind_vector.get_angle_degrees() - 90) % 360)
 
                 logging.info('Sail angle is: {:.2f}°'.format(sail_angle))
 
