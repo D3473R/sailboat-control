@@ -16,20 +16,23 @@ def get_sail_angle(awa):
     return round(sail_angle, 2)
 
 
-def map_rudder_servo(heading_delta):
+def map_rudder_servo(heading_delta, boat_speed):
     """Maps the heading delta to a rudder servo value."""
 
     assert isinstance(heading_delta, float) or isinstance(heading_delta, int)
 
-    if heading_delta <= 90:
-        rudder_value = translate(heading_delta, 0, 90, RUDDER_SERVO_MIDDLE, RUDDER_SERVO_MAX)
-    elif heading_delta <= 180:
-        rudder_value = RUDDER_SERVO_MAX
-    elif heading_delta <= 270:
-        rudder_value = RUDDER_SERVO_MIN
-    else:
-        rudder_value = translate(heading_delta, 270, 360, RUDDER_SERVO_MIN, RUDDER_SERVO_MIDDLE)
+    if boat_speed < 0:
+        heading_delta = heading_delta * -1
 
+    if heading_delta <= -90:
+        rudder_value = RUDDER_SERVO_MIN
+    elif heading_delta <= 0:
+        rudder_value = translate(heading_delta, -90, 0, RUDDER_SERVO_MIN, RUDDER_SERVO_MIDDLE)
+    elif heading_delta <= 90:
+        rudder_value = translate(heading_delta, 0, 90, RUDDER_SERVO_MIDDLE, RUDDER_SERVO_MAX)
+    else:
+        rudder_value = RUDDER_SERVO_MAX
+        
     return round(rudder_value)
 
 
@@ -38,7 +41,7 @@ def map_sail_servo(sail_angle):
 
     assert isinstance(sail_angle, float) or isinstance(sail_angle, int)
 
-    sail_value = translate(sail_angle, 0, 90, SAIL_SERVO_MAX, SAIL_SERVO_MIN)
+    sail_value = translate(sail_angle, 0, 90, SAIL_SERVO_MIN, SAIL_SERVO_MAX)
     return round(sail_value)
 
 def translate(value, leftMin, leftMax, rightMin, rightMax):

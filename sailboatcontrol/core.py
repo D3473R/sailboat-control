@@ -45,10 +45,12 @@ PATH_CALCULATION_TIMEOUT = 4
 DEBUG = True
 
 wind_direction = 90
+wind_direction_x_y = (90 - wind_direction) % 360
 wind_speed = 7.71604938271605
 wind_data = False
 
 boat_heading = 0
+boat_heading_x_y = 90
 
 gps_thread_stop = threading.Event()
 bno_thread_stop = threading.Event()
@@ -72,10 +74,11 @@ def gps_sensor(s, stop_event):
 
 
 def bno_sensor(bno, stop_event):
-    global boat_heading
+    global boat_heading, boat_heading_x_y
     while not stop_event.is_set():
         heading, roll, pitch = bno.read_euler()
-        boat_heading = (90 - heading) % 360
+        boat_heading = heading
+        boat_heading_x_y = (90 - heading) % 360
         time.sleep(0.1)
 
 
@@ -90,9 +93,10 @@ def on_disconnect(client, userdata, rc=0):
 
 
 def on_message(client, userdata, msg):
-    global wind_direction, wind_speed, wind_data
+    global wind_direction, wind_direction_x_y, wind_speed, wind_data
     msg = json.loads(msg.payload.decode('ASCII'))
     wind_direction = msg['direction']
+    wind_direction_x_y = (90 - wind_direction) % 360
     wind_speed = msg['speed']
     wind_data = True
 
@@ -113,8 +117,8 @@ def get_nearest_value(dictionary, value):
     return min(dictionary, key=lambda x: abs(float(x) - value))
 
 
-def median(l1, l2, l3):
-    return math.sqrt((2 * (l1 ** 2 + l2 ** 2) - l3 ** 2) / 4)
+def median(a, b, c):
+    return math.sqrt((2 * (a ** 2 + b ** 2) - c ** 2) / 4)
 
 
 def kn_to_ms(kn):
@@ -141,10 +145,9 @@ class Vector:
 
     @staticmethod
     def from_vector(vector):
-        vector_length = np.linalg.norm(vector)
-        v2 = np.array([1, 0])
-        angle = vector_length * np.linalg.norm(v2)
-        return Vector(np.arccos(np.dot(vector, v2) / angle), vector_length)
+        v = Vector(0, 0)
+        v.set_vector(vector)
+        return v
 
     def get_angle(self):
         v1 = self.__vector
@@ -154,6 +157,9 @@ class Vector:
 
     def get_vector(self):
         return self.__vector
+
+    def set_vector(self, vector):
+        self.__vector = vector
 
     def set_angle(self, angle):
         self.__init__(angle, self.get_length())
@@ -198,14 +204,14 @@ class Path:
         for k, vector in enumerate(self.__vectors):
             if not impossible_path:
                 logging.info('Vector {}: {}'.format(k, vector))
-                apparent_wind_angle = angle_between_angles(wind_direction, vector.get_angle_degrees())
+                apparent_wind_angle = angle_between_angles(wind_direction_x_y, vector.get_angle_degrees())
                 if apparent_wind_angle < WIND_ANGLE_THRESHOLD_DEGREE:
                     logging.info('Path {}: {} has an impossible angle in Vector: {} {} with {:.2f}°'
                                  .format(self.__index, self, k, vector, apparent_wind_angle))
                     impossible_path = True
                 else:
                     logging.info('Real wind speed: {:.2f} m/s / {:.2f} kn'.format(wind_speed, ms_to_kn(wind_speed)))
-                    logging.info('Real wind angle: {:.2f}°'.format(wind_direction))
+                    logging.info('Real wind angle: {:.2f}°'.format(wind_direction_x_y))
                     logging.info('Boat angle on vector: {:.2f}°'.format(vector.get_angle_degrees()))
                     logging.info('Apparent wind angle: {:.2f}°'.format(apparent_wind_angle))
                     nearest_wind_speed = float(get_nearest_value(wind['wind'], ms_to_kn(wind_speed)))
@@ -254,25 +260,53 @@ class Path:
 
 def calculate_initial_paths(target_angle, target_distance):
     v1 = Vector(math.radians(target_angle), target_distance)
-    v2_a = Vector(math.radians(90), v1.get_opposite_len())
-    v2_b = Vector(math.radians(0), v1.get_adjacent_len())
-    v3_a = Vector(math.radians(90), v2_a.get_length() / 2)
+    v2_a = Vector.from_vector(np.array([v1.x(), 0]))
+    v2_b = Vector.from_vector(np.array([0, v1.y()]))
+    v3_a = Vector(v2_a.get_angle(), v2_a.get_length() / 2)
     angle = math.degrees(math.atan(v2_b.get_length() / v3_a.get_length())) if v3_a.get_length() > 0 else 0
-    v3_b = Vector(
-        math.radians(angle_between_angles(90, angle)),
-        median(v1.get_length(), v2_b.get_length(), v2_a.get_length()))
+    x = v1.x()
+    y = v1.y()
+    if x >= 0:
+        if y >= 0:
+            angle = angle
+        else:
+            angle = 360 - angle
+    else:
+        if y >= 0:
+            angle = 180 - angle
+        else:
+            angle = 180 + angle
+    v3_b = Vector(math.radians(angle), median(v1.get_length(), v2_b.get_length(), v2_a.get_length()))
 
     return [Path(0, v1), Path(1, v2_a, v2_b), Path(2, v3_a, v3_b)]
 
 
-def calculate_paths(v1, v2, v3):
+def calculate_paths(v1, v2, v3, direction):
     v2_a = v2
     v2_b = v3
 
-    v3_a = Vector(math.radians(90), v2_a.get_length() / 2)
+    v3_a = Vector(v2_a.get_angle(), v2_a.get_length() / 2)
     v3_b_l = median(v1.get_length(), v2_b.get_length(), v2_a.get_length())
-    v3_b_a = math.degrees(angle_between_vectors(v2.get_vector(), np.array([v1.x(), np.subtract(v1.y(), v2.y() / 2.0)])))
-    v3_b = Vector(math.radians(angle_between_angles(90, v3_b_a)), v3_b_l)
+
+    if direction == 'right':
+        angle = math.degrees(math.atan(v2_b.get_length() / (abs(v1.x()) - v3_a.get_length()))) if abs(v1.x()) - v3_a.get_length() > 0 else 0
+    else:  # direction == left
+        angle = math.degrees(math.atan(v2_b.get_length() / v3_a.get_length())) if v3_a.get_length() > 0 else 0
+
+    x = v1.x()
+    y = v1.y()
+    if x >= 0:
+        if y >= 0:
+            angle = angle
+        else:
+            angle = 360 - angle
+    else:
+        if y >= 0:
+            angle = 180 - angle
+        else:
+            angle = 180 + angle
+
+    v3_b = Vector(math.radians(angle), v3_b_l)
 
     return [Path(0, v1), Path(1, v2_a, v2_b), Path(2, v3_a, v3_b)]
 
@@ -297,7 +331,7 @@ def calculate_best_path(paths, increments):
 
         if len(paths) == 0:
             logging.info('No suitable path found. Target is directly in the wind')
-            paths.append(Path(0, Vector(math.radians(45), 1)))
+            paths.append(Path(0, Vector((wind_direction_x_y - 45) % 360, 1)))
         if len(paths) == 1:
             return paths[0]
         logging.info('Sorted paths by time: {}'.format(paths))
@@ -309,7 +343,7 @@ def calculate_best_path(paths, increments):
                 v2 = p2.get_vectors()[0]
                 v3 = p2.get_vectors()[1]
 
-                paths = calculate_paths(v1, v2, v3)
+                paths = calculate_paths(v1, v2, v3, direction='right')
             elif paths[0].get_index() == 1 or paths[1].get_index() == 1:
                 p1, p2 = (paths[0], paths[1]) if paths[0].get_index() == 0 else (paths[1], paths[0])
                 v1 = p1.get_vectors()[1]
@@ -317,8 +351,7 @@ def calculate_best_path(paths, increments):
                 v3 = p2.get_vectors()[1]
 
                 vector_prefix = np.add(vector_prefix, v2.get_vector())
-
-                paths = calculate_paths(v1, v2, v3)
+                paths = calculate_paths(v1, v2, v3, direction='left')
 
     best_path = paths[0]
 
@@ -398,20 +431,19 @@ def main():
 
                 logging.info('Real boat heading is: {}'.format(boat_heading))
 
-                heading_delta = angle_between_angles(boat_heading, best_path.get_heading())
+                heading_delta = (((best_path.get_heading() - boat_heading_x_y) + 180) % 360 - 180) * -1
                 logging.info('Heading delta is: {:.2f}°'.format(heading_delta))
 
-                rudder_servo_value = helpers.map_rudder_servo(heading_delta)
+                rudder_servo_value = helpers.map_rudder_servo(heading_delta, gps['speed'])
 
                 logging.info('Rudder servo value is: {:.2f}'.format(rudder_servo_value))
                 servo_pwm.set_pwm(0, 0, rudder_servo_value)
 
-                real_wind_vector = Vector(math.radians(wind_direction), wind_speed)
-                boat_vector = Vector(math.radians(boat_heading), gps['speed'])
-                apparent_wind_vector = Vector.from_vector(
-                    np.subtract(real_wind_vector.get_vector(), boat_vector.get_vector()))
+                real_wind_vector = Vector(math.radians(wind_direction_x_y), wind_speed)
+                boat_vector = Vector(math.radians(boat_heading_x_y), gps['speed'])
+                apparent_wind_vector = Vector.from_vector(np.subtract(real_wind_vector.get_vector(), boat_vector.get_vector()))
 
-                sail_angle = helpers.get_sail_angle((apparent_wind_vector.get_angle_degrees() - 90) % 360)
+                sail_angle = helpers.get_sail_angle((apparent_wind_vector.get_angle_degrees() + 90) % 360)
 
                 logging.info('Sail angle is: {:.2f}°'.format(sail_angle))
 
