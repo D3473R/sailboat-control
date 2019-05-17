@@ -44,6 +44,10 @@ PATH_CALCULATION_TIMEOUT = 4
 
 DEBUG = True
 
+# NORTH = 0
+# EAST  = 90
+# SOUTH = 180
+# WEST  = 270
 wind_direction = 90
 wind_direction_x_y = (90 - wind_direction) % 360
 wind_speed = 7.71604938271605
@@ -150,10 +154,7 @@ class Vector:
         return v
 
     def get_angle(self):
-        v1 = self.__vector
-        v2 = np.array([1, 0])
-        angle = np.linalg.norm(v1) * np.linalg.norm(v2)
-        return np.arccos(np.dot(v1, v2) / angle) if angle > 0 else 0
+        return math.radians(self.get_angle_degrees())
 
     def get_vector(self):
         return self.__vector
@@ -165,7 +166,9 @@ class Vector:
         self.__init__(angle, self.get_length())
 
     def get_angle_degrees(self):
-        return math.degrees(self.get_angle())
+        inv = np.arctan2(self.y(), self.x())
+        degree = np.mod(np.degrees(inv), 360)
+        return degree
 
     def get_length(self):
         return np.linalg.norm(self.__vector)
@@ -205,13 +208,14 @@ class Path:
             if not impossible_path:
                 logging.info('Vector {}: {}'.format(k, vector))
                 apparent_wind_angle = angle_between_angles(wind_direction_x_y, vector.get_angle_degrees())
+
                 if apparent_wind_angle < WIND_ANGLE_THRESHOLD_DEGREE:
                     logging.info('Path {}: {} has an impossible angle in Vector: {} {} with {:.2f}°'
                                  .format(self.__index, self, k, vector, apparent_wind_angle))
                     impossible_path = True
                 else:
                     logging.info('Real wind speed: {:.2f} m/s / {:.2f} kn'.format(wind_speed, ms_to_kn(wind_speed)))
-                    logging.info('Real wind angle: {:.2f}°'.format(wind_direction_x_y))
+                    logging.info('Real wind angle in x/y: {:.2f}°'.format(wind_direction_x_y))
                     logging.info('Boat angle on vector: {:.2f}°'.format(vector.get_angle_degrees()))
                     logging.info('Apparent wind angle: {:.2f}°'.format(apparent_wind_angle))
                     nearest_wind_speed = float(get_nearest_value(wind['wind'], ms_to_kn(wind_speed)))
@@ -439,11 +443,21 @@ def main():
                 logging.info('Rudder servo value is: {:.2f}'.format(rudder_servo_value))
                 servo_pwm.set_pwm(0, 0, rudder_servo_value)
 
-                real_wind_vector = Vector(math.radians(wind_direction_x_y), wind_speed)
+                real_wind_vector = Vector(math.radians((wind_direction_x_y - 180) % 360), wind_speed)
                 boat_vector = Vector(math.radians(boat_heading_x_y), gps['speed'])
-                apparent_wind_vector = Vector.from_vector(np.subtract(real_wind_vector.get_vector(), boat_vector.get_vector()))
+                awv_boat = Vector.from_vector(np.subtract(real_wind_vector.get_vector(), boat_vector.get_vector()))
 
-                sail_angle = helpers.get_sail_angle((apparent_wind_vector.get_angle_degrees() + 90) % 360)
+                delta = abs(boat_heading_x_y - (awv_boat.get_angle_degrees() + 180) % 360)
+
+                if delta > 180:
+                    delta = 360 - delta
+
+                logging.info('Real wind speed: {:.2f} m/s / {:.2f} kn'.format(wind_speed, ms_to_kn(wind_speed)))
+                logging.info('Real wind angle: {:.2f}°'.format(wind_direction))
+                logging.info('Boat angle: {:.2f}°'.format(boat_heading))
+                logging.info('Apparent wind angle: {:.2f}°'.format(delta))
+
+                sail_angle = helpers.get_sail_angle(delta)
 
                 logging.info('Sail angle is: {:.2f}°'.format(sail_angle))
 
