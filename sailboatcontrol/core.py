@@ -372,6 +372,7 @@ def calculate_best_path(paths, increments):
 
 
 def main():
+    global wind_data
     client = mqtt.Client()
     client.on_connect = on_connect
     client.on_disconnect = on_disconnect
@@ -380,7 +381,7 @@ def main():
     if DEBUG:
         wind_data = True
     else:
-        client.connect("192.168.137.219", 1883, 60)
+        client.connect("10.0.0.46", 1883, 60)
         client.loop_start()
 
     while not wind_data:
@@ -471,7 +472,6 @@ def main():
             logging.info('Start new cycle')
         else:
             break
-
 
 if __name__ == '__main__':
     try:
