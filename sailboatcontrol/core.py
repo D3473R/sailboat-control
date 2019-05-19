@@ -8,11 +8,13 @@ import threading
 import time
 
 import geojson
+import csv
 import math
 import numpy as np
 import paho.mqtt.client as mqtt
 import pynmea2
 import serial
+from datetime import datetime
 from Adafruit_BNO055 import BNO055
 from Adafruit_PCA9685 import PCA9685
 from geographiclib.geodesic import Geodesic
@@ -67,14 +69,17 @@ with open('../json/wind.json') as g:
 
 def gps_sensor(s, stop_event):
     global gps
-    while not stop_event.is_set():
-        line = s.readline().decode('ASCII')
-        msg = pynmea2.parse(line)
-        if msg.sentence_type == 'RMC' and msg.status == 'A':
-            gps['status'] = msg.status
-            gps['lon'] = msg.longitude
-            gps['lat'] = msg.latitude
-            gps['speed'] = kn_to_ms(msg.spd_over_grnd)
+    with open('../logs/gps.csv', 'a') as gps_log_file:
+        csv_writer = csv.writer(gps_log_file)
+        while not stop_event.is_set():
+            line = s.readline().decode('ASCII')
+            msg = pynmea2.parse(line)
+            if msg.sentence_type == 'RMC' and msg.status == 'A':
+                gps['status'] = msg.status
+                gps['lon'] = msg.longitude
+                gps['lat'] = msg.latitude
+                gps['speed'] = kn_to_ms(msg.spd_over_grnd)
+                csv_writer.writerow([datetime.now().isoformat(), msg.latitude / 100.0 , msg.longitude / 100.0])
 
 
 def bno_sensor(bno, stop_event):
