@@ -19,6 +19,7 @@ from datetime import datetime
 from Adafruit_BNO055 import BNO055
 from Adafruit_PCA9685 import PCA9685
 from geographiclib.geodesic import Geodesic
+from logging.handlers import TimedRotatingFileHandler
 
 try:
     from sailboatcontrol import helpers
@@ -32,19 +33,19 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)-5.5s]  %(message)s',
     handlers=[
-        logging.FileHandler('{0}/{1}.log'.format('../logs', 'sailboat-control'), 'a', 'utf-8'),
+        TimedRotatingFileHandler('{0}/{1}'.format('../logs', 'sailboat-control'), when="m", interval=30),
         logging.StreamHandler()
     ]
 )
 
-MQTT_HOST = '10.0.0.19'
+MQTT_HOST = '192.168.4.1'
 BNO_SERIAL_PORT = '/dev/serial0'
 GPS_SERIAL_PORT = '/dev/ttyACM0'
 MS_KN = 1.944
 WIND_ANGLE_THRESHOLD_DEGREE = 15
 TARGET_RADIUS = 5
 PATH_CALCULATION_ITERATIONS = 1
-PATH_CALCULATION_TIMEOUT = 4
+PATH_CALCULATION_TIMEOUT = 0.5
 CALIBRATION_THRESHOLD = 1
 
 DEBUG = True
@@ -66,7 +67,7 @@ gps_thread_stop = threading.Event()
 bno_thread_stop = threading.Event()
 compass_thread_stop = threading.Event()
 
-gps = {'lon': 0.0, 'lat': 0.0, 'speed': 0.0, 'status': 'V'}
+gps = {'lon': 0.0, 'lat': 0.0, 'speed': 0.0, 'status': 'V', 'timestamp': datetime.now()}
 
 with open('../json/wind.json') as g:
     wind = json.load(g)
@@ -78,14 +79,19 @@ def gps_sensor(s, stop_event):
         with open('../logs/gps.csv', 'a') as gps_log_file:
             csv_writer = csv.writer(gps_log_file)
             while not stop_event.is_set():
-                line = s.readline().decode('ASCII')
-                msg = pynmea2.parse(line)
-                if msg.sentence_type == 'RMC' and msg.status == 'A':
-                    gps['status'] = msg.status
-                    gps['lon'] = msg.longitude
-                    gps['lat'] = msg.latitude
-                    gps['speed'] = kn_to_ms(msg.spd_over_grnd)
-                    csv_writer.writerow([datetime.now().isoformat(), msg.latitude, msg.longitude])
+                try:
+                    line = s.readline().decode('ASCII')
+                    msg = pynmea2.parse(line)
+                    if msg.sentence_type == 'RMC' and msg.status == 'A':
+                        gps['status'] = msg.status
+                        gps['lon'] = msg.longitude
+                        gps['lat'] = msg.latitude
+                        gps['speed'] = kn_to_ms(msg.spd_over_grnd)
+                        gps['timestamp'] = datetime.now()
+                        csv_writer.writerow([datetime.now().isoformat(), msg.latitude, msg.longitude])
+                except Exception as e:
+                    logging.warn('ERROR IN GPS THREAD, WAITING 5 SECONDS...: {}'.format(e))
+                    time.sleep(5)
     except Exception as e:
         logging.error('ERROR IN GPS THREAD: {}'.format(e))
 
@@ -494,7 +500,7 @@ def main():
             geodesic = Geodesic.WGS84.Inverse(gps['lat'], gps['lon'], waypoint[1], waypoint[0])
 
             while geodesic['s12'] > TARGET_RADIUS:
-                logging.info('Boat gps: {}, {}'.format(gps['lat'], gps['lon']))
+                logging.info('Boat gps: {}, {}, timestamp={}'.format(gps['lat'], gps['lon'], gps['timestamp']))
                 geodesic = Geodesic.WGS84.Inverse(gps['lat'], gps['lon'], waypoint[1], waypoint[0])
 
                 logging.info('Distance to target: {:.2f}m'.format(geodesic['s12']))
