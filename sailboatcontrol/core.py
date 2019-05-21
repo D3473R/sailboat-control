@@ -8,6 +8,7 @@ import threading
 import time
 
 import geojson
+import smbus
 import csv
 import math
 import numpy as np
@@ -36,6 +37,7 @@ logging.basicConfig(
     ]
 )
 
+MQTT_HOST = '10.0.0.19'
 BNO_SERIAL_PORT = '/dev/serial0'
 GPS_SERIAL_PORT = '/dev/ttyACM0'
 MS_KN = 1.944
@@ -43,8 +45,10 @@ WIND_ANGLE_THRESHOLD_DEGREE = 15
 TARGET_RADIUS = 5
 PATH_CALCULATION_ITERATIONS = 1
 PATH_CALCULATION_TIMEOUT = 4
+CALIBRATION_THRESHOLD = 1
 
 DEBUG = True
+COMPASS = True
 
 # NORTH = 0
 # EAST  = 90
@@ -60,6 +64,7 @@ boat_heading_x_y = 90
 
 gps_thread_stop = threading.Event()
 bno_thread_stop = threading.Event()
+compass_thread_stop = threading.Event()
 
 gps = {'lon': 0.0, 'lat': 0.0, 'speed': 0.0, 'status': 'V'}
 
@@ -69,26 +74,56 @@ with open('../json/wind.json') as g:
 
 def gps_sensor(s, stop_event):
     global gps
-    with open('../logs/gps.csv', 'a') as gps_log_file:
-        csv_writer = csv.writer(gps_log_file)
-        while not stop_event.is_set():
-            line = s.readline().decode('ASCII')
-            msg = pynmea2.parse(line)
-            if msg.sentence_type == 'RMC' and msg.status == 'A':
-                gps['status'] = msg.status
-                gps['lon'] = msg.longitude
-                gps['lat'] = msg.latitude
-                gps['speed'] = kn_to_ms(msg.spd_over_grnd)
-                csv_writer.writerow([datetime.now().isoformat(), msg.latitude / 100.0 , msg.longitude / 100.0])
+    try:
+        with open('../logs/gps.csv', 'a') as gps_log_file:
+            csv_writer = csv.writer(gps_log_file)
+            while not stop_event.is_set():
+                line = s.readline().decode('ASCII')
+                msg = pynmea2.parse(line)
+                if msg.sentence_type == 'RMC' and msg.status == 'A':
+                    gps['status'] = msg.status
+                    gps['lon'] = msg.longitude
+                    gps['lat'] = msg.latitude
+                    gps['speed'] = kn_to_ms(msg.spd_over_grnd)
+                    csv_writer.writerow([datetime.now().isoformat(), msg.latitude, msg.longitude])
+    except Exception as e:
+        logging.error('ERROR IN GPS THREAD: {}'.format(e))
 
 
 def bno_sensor(bno, stop_event):
     global boat_heading, boat_heading_x_y
-    while not stop_event.is_set():
-        heading, roll, pitch = bno.read_euler()
-        boat_heading = heading
-        boat_heading_x_y = (90 - heading) % 360
-        time.sleep(0.1)
+    try:
+        while not stop_event.is_set():
+            heading, roll, pitch = bno.read_euler()
+            boat_heading = heading
+            boat_heading_x_y = (90 - heading) % 360
+            time.sleep(0.1)
+    except Exception as e:
+        logging.error('ERROR IN BNO THREAD: {}'.format(e))
+
+def compass_sensor(compass, stop_event):
+    global boat_heading, boat_heading_x_y
+    try:
+        while not stop_event.is_set():
+            boat_heading = (read_compass_bearing(compass) + 180) % 360
+            boat_heading_x_y = (90 - boat_heading) % 360
+            time.sleep(0.1)
+    except Exception as e:
+        logging.error('ERROR IN COMPASS THREAD: {}'.format(e))
+
+
+def read_compass_bearing(bus):
+	return ((bus.read_byte_data(0x60, 0x02) << 8) + bus.read_byte_data(0x60, 0x03)) / 10
+	
+
+def read_calibration_state(bus):
+    value = bus.read_byte_data(0x60, 0x1E)
+    mask = 0b00000011
+    calibration = [0, 0, 0, 0]
+    for i in range(4):
+        calibration[3 - i] = (value & mask) >> (2 * i)
+        mask = mask << 2
+    return calibration
 
 
 def on_connect(client, userdata, flags, rc):
@@ -127,7 +162,7 @@ def get_nearest_value(dictionary, value):
 
 
 def median(a, b, c):
-    return math.sqrt((2 * (a ** 2 + b ** 2) - c ** 2) / 4)
+    return math.sqrt(abs((2 * (a ** 2 + b ** 2) - c ** 2) / 4))
 
 
 def kn_to_ms(kn):
@@ -287,7 +322,7 @@ def calculate_initial_paths(target_angle, target_distance):
             angle = 180 + angle
     v3_b = Vector(math.radians(angle), median(v1.get_length(), v2_b.get_length(), v2_a.get_length()))
 
-    return [Path(0, v1), Path(1, v2_a, v2_b), Path(2, v3_a, v3_b)]
+    return [Path(0, v1)] # , Path(1, v2_a, v2_b), Path(2, v3_a, v3_b)]
 
 
 def calculate_paths(v1, v2, v3, direction):
@@ -317,7 +352,7 @@ def calculate_paths(v1, v2, v3, direction):
 
     v3_b = Vector(math.radians(angle), v3_b_l)
 
-    return [Path(0, v1), Path(1, v2_a, v2_b), Path(2, v3_a, v3_b)]
+    return [Path(0, v1)] # , Path(1, v2_a, v2_b), Path(2, v3_a, v3_b)]
 
 
 def calculate_best_path(paths, increments):
@@ -375,6 +410,14 @@ def calculate_best_path(paths, increments):
 
     return best_path
 
+def hold_position():
+    global wind_data
+    logging.info('Holding position...')
+    while True:
+        heading_delta = (((wind_direction_x_y - boat_heading_x_y) + 180) % 360 - 180) * -1
+        rudder_servo_value = helpers.map_rudder_servo(heading_delta)
+        time.sleep(PATH_CALCULATION_TIMEOUT)
+
 
 def main():
     global wind_data
@@ -386,7 +429,7 @@ def main():
     if DEBUG:
         wind_data = True
     else:
-        client.connect("10.0.0.46", 1883, 60)
+        client.connect(MQTT_HOST, 1883, 60)
         client.loop_start()
 
     while not wind_data:
@@ -400,18 +443,39 @@ def main():
     gps_thread = threading.Thread(target=gps_sensor, args=(gps_serial, gps_thread_stop))
     gps_thread.start()
 
-    bno_serial = BNO055.BNO055(serial_port=BNO_SERIAL_PORT, rst=18)
-    while True:
-        try:
-            if not bno_serial.begin():
-                raise RuntimeError('Failed to initialize BNO055! Is the sensor connected?')
-            break
-        except RuntimeError:
-            logging.warning('Got BNO Error, waiting one second...')
-            time.sleep(1)
+    if COMPASS:
+        bus = smbus.SMBus(1)
+        compass_thread = threading.Thread(target=compass_sensor, args=(bus, compass_thread_stop))
+        compass_thread.start()
 
-    bno_thread = threading.Thread(target=bno_sensor, args=(bno_serial, bno_thread_stop))
-    bno_thread.start()
+        while True:
+            sys, gyro, accel, mag = read_calibration_state(bus)
+            logging.info('Calibration data: sys={}, gyro={}, accel={}, mag={}'.format(sys, gyro, accel, mag))
+
+            if sys >= CALIBRATION_THRESHOLD and gyro >= CALIBRATION_THRESHOLD and accel >= CALIBRATION_THRESHOLD and mag >= CALIBRATION_THRESHOLD:
+                logging.info('Calibration complete!')
+                break
+            time.sleep(0.2)
+    else:
+        bno_serial = BNO055.BNO055(serial_port=BNO_SERIAL_PORT, rst=18)
+        while True:
+            try:
+                if not bno_serial.begin():
+                    raise RuntimeError('Failed to initialize BNO055! Is the sensor connected?')
+                break
+            except RuntimeError:
+                logging.warning('Got BNO Error, waiting one second...')
+                time.sleep(1)
+
+        while True:
+            sys, gyro, accel, mag = bno_serial.get_calibration_status()
+            logging.info('Calibration data: sys={}, gyro={}, accel={}, mag={}'.format(sys, gyro, accel, mag))
+            time.sleep(0.1)
+            if sys == 3 and gyro == 3 and accel == 3 and mag == 3:
+                break
+
+        bno_thread = threading.Thread(target=bno_sensor, args=(bno_serial, bno_thread_stop))
+        bno_thread.start()
 
     with open('../json/waypoints.json') as f:
         waypoints = geojson.load(f)
@@ -433,18 +497,20 @@ def main():
                 logging.info('Boat gps: {}, {}'.format(gps['lat'], gps['lon']))
                 geodesic = Geodesic.WGS84.Inverse(gps['lat'], gps['lon'], waypoint[1], waypoint[0])
 
+                logging.info('Distance to target: {:.2f}m'.format(geodesic['s12']))
+
                 geodesic['azi1'] = (90 - geodesic['azi1']) % 360
 
                 paths = calculate_initial_paths(geodesic['azi1'], geodesic['s12'])
                 best_path = calculate_best_path(paths, PATH_CALCULATION_ITERATIONS)
                 logging.info('Best path is {}'.format(best_path))
 
-                logging.info('Real boat heading is: {}'.format(boat_heading))
+                logging.info('Real boat heading is: {:.2f}'.format(boat_heading))
 
                 heading_delta = (((best_path.get_heading() - boat_heading_x_y) + 180) % 360 - 180) * -1
                 logging.info('Heading delta is: {:.2f}°'.format(heading_delta))
 
-                rudder_servo_value = helpers.map_rudder_servo(heading_delta, gps['speed'])
+                rudder_servo_value = helpers.map_rudder_servo(heading_delta)
 
                 logging.info('Rudder servo value is: {:.2f}'.format(rudder_servo_value))
                 servo_pwm.set_pwm(0, 0, rudder_servo_value)
@@ -476,7 +542,8 @@ def main():
         if cyclic:
             logging.info('Start new cycle')
         else:
-            break
+            logging.info('Finished course!')
+            # hold_position()
 
 if __name__ == '__main__':
     try:
@@ -484,3 +551,6 @@ if __name__ == '__main__':
     except KeyboardInterrupt:
         gps_thread_stop.set()
         bno_thread_stop.set()
+        compass_thread_stop.set()
+    except Exception as e:
+        logging.error('ERROR IN MAIN THREAD: {}'.format(e))

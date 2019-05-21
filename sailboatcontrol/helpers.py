@@ -16,13 +16,10 @@ def get_sail_angle(awa):
     return round(sail_angle, 2)
 
 
-def map_rudder_servo(heading_delta, boat_speed):
+def map_rudder_servo(heading_delta):
     """Maps the heading delta to a rudder servo value."""
 
     assert isinstance(heading_delta, float) or isinstance(heading_delta, int)
-
-    if boat_speed < 0:
-        heading_delta = heading_delta * -1
 
     if heading_delta <= -90:
         rudder_value = RUDDER_SERVO_MIN
