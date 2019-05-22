@@ -47,6 +47,7 @@ TARGET_RADIUS = 5
 PATH_CALCULATION_ITERATIONS = 1
 PATH_CALCULATION_TIMEOUT = 0.5
 CALIBRATION_THRESHOLD = 1
+DIRECT_WIND_OFFSET = 45
 
 DEBUG = True
 COMPASS = True
@@ -371,7 +372,7 @@ def calculate_best_path(paths, increments):
         for j, path in enumerate(paths):
             if path.calculate_vectors():
                 impossible_paths.append(j)
-
+    
             logging.info('Path {}: {}'.format(j, path))
 
         for path in sorted(impossible_paths, reverse=True):
@@ -381,7 +382,12 @@ def calculate_best_path(paths, increments):
 
         if len(paths) == 0:
             logging.info('No suitable path found. Target is directly in the wind')
-            paths.append(Path(0, Vector(math.radians((wind_direction_x_y - 45) % 360), 1)))
+            offset = DIRECT_WIND_OFFSET
+            if ((boat_heading_x_y - wind_direction_x_y) + 180) % 360 - 180 >= 0:
+                offset = offset * 1
+            else:
+                offset = offset * -1
+            paths.append(Path(0, Vector(math.radians((wind_direction_x_y + offset) % 360), 1)))
         if len(paths) == 1:
             return paths[0]
         logging.info('Sorted paths by time: {}'.format(paths))
