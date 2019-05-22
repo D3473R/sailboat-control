@@ -33,7 +33,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)-5.5s]  %(message)s',
     handlers=[
-        TimedRotatingFileHandler('{0}/{1}'.format('../logs', 'sailboat-control'), when="m", interval=30),
+        TimedRotatingFileHandler('{0}/{1}'.format('../logs', 'sailboat-control'), encoding='utf-8', when="m", interval=30),
         logging.StreamHandler()
     ]
 )
@@ -381,7 +381,7 @@ def calculate_best_path(paths, increments):
 
         if len(paths) == 0:
             logging.info('No suitable path found. Target is directly in the wind')
-            paths.append(Path(0, Vector((wind_direction_x_y - 45) % 360, 1)))
+            paths.append(Path(0, Vector(math.radians((wind_direction_x_y - 45) % 360), 1)))
         if len(paths) == 1:
             return paths[0]
         logging.info('Sorted paths by time: {}'.format(paths))
