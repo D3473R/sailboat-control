@@ -42,12 +42,14 @@ MQTT_HOST = '192.168.4.1'
 BNO_SERIAL_PORT = '/dev/serial0'
 GPS_SERIAL_PORT = '/dev/ttyACM0'
 MS_KN = 1.944
-WIND_ANGLE_THRESHOLD_DEGREE = 15
+WIND_ANGLE_THRESHOLD_DEGREE = 30
+WIND_ANGLE_THRESHOLD_DEGREE_OFFSET = 0
 TARGET_RADIUS = 5
 PATH_CALCULATION_ITERATIONS = 1
 PATH_CALCULATION_TIMEOUT = 0.5
 CALIBRATION_THRESHOLD = 1
 DIRECT_WIND_OFFSET = 45
+GPS_ERROR_TIMEOUT = 2
 
 DEBUG = True
 COMPASS = True
@@ -56,7 +58,7 @@ COMPASS = True
 # EAST  = 90
 # SOUTH = 180
 # WEST  = 270
-wind_direction = 90
+wind_direction = 0
 wind_direction_x_y = (90 - wind_direction) % 360
 wind_speed = 7.71604938271605
 wind_data = False
@@ -89,10 +91,10 @@ def gps_sensor(s, stop_event):
                         gps['lat'] = msg.latitude
                         gps['speed'] = kn_to_ms(msg.spd_over_grnd)
                         gps['timestamp'] = datetime.now()
-                        csv_writer.writerow([datetime.now().isoformat(), msg.latitude, msg.longitude])
+                        csv_writer.writerow([datetime.utcnow().isoformat(), msg.latitude, msg.longitude])
                 except Exception as e:
-                    logging.warn('ERROR IN GPS THREAD, WAITING 5 SECONDS...: {}'.format(e))
-                    time.sleep(5)
+                    logging.warn('ERROR IN GPS THREAD, WAITING {} SECONDS...: {}'.format(GPS_ERROR_TIMEOUT, e))
+                    time.sleep(GPS_ERROR_TIMEOUT)
     except Exception as e:
         logging.error('ERROR IN GPS THREAD: {}'.format(e))
 
@@ -249,29 +251,33 @@ class Path:
         self.__vectors = list(vectors)
 
     def calculate_vectors(self):
+        global WIND_ANGLE_THRESHOLD_DEGREE_OFFSET
+
         impossible_path = False
 
         for k, vector in enumerate(self.__vectors):
             if not impossible_path:
-                logging.info('Vector {}: {}'.format(k, vector))
+                logging.debug('Vector {}: {}'.format(k, vector))
                 apparent_wind_angle = angle_between_angles(wind_direction_x_y, vector.get_angle_degrees())
 
-                if apparent_wind_angle < WIND_ANGLE_THRESHOLD_DEGREE:
+                if apparent_wind_angle < WIND_ANGLE_THRESHOLD_DEGREE + WIND_ANGLE_THRESHOLD_DEGREE_OFFSET:
                     logging.info('Path {}: {} has an impossible angle in Vector: {} {} with {:.2f}°'
                                  .format(self.__index, self, k, vector, apparent_wind_angle))
                     impossible_path = True
+                    WIND_ANGLE_THRESHOLD_DEGREE_OFFSET = 10
                 else:
-                    logging.info('Real wind speed: {:.2f} m/s / {:.2f} kn'.format(wind_speed, ms_to_kn(wind_speed)))
-                    logging.info('Real wind angle in x/y: {:.2f}°'.format(wind_direction_x_y))
-                    logging.info('Boat angle on vector: {:.2f}°'.format(vector.get_angle_degrees()))
-                    logging.info('Apparent wind angle: {:.2f}°'.format(apparent_wind_angle))
+                    WIND_ANGLE_THRESHOLD_DEGREE_OFFSET = 0
+                    logging.debug('Real wind speed: {:.2f} m/s / {:.2f} kn'.format(wind_speed, ms_to_kn(wind_speed)))
+                    logging.debug('Real wind angle in x/y: {:.2f}°'.format(wind_direction_x_y))
+                    logging.debug('Boat angle on vector: {:.2f}°'.format(vector.get_angle_degrees()))
+                    logging.debug('Apparent wind angle: {:.2f}°'.format(apparent_wind_angle))
                     nearest_wind_speed = float(get_nearest_value(wind['wind'], ms_to_kn(wind_speed)))
                     boat_angle = get_nearest_value(wind['wind'][str(nearest_wind_speed)], apparent_wind_angle)
                     boat_speed = wind['wind'][str(nearest_wind_speed)][boat_angle]
                     boat_speed_ms = kn_to_ms(boat_speed)
                     boat_angle = float(boat_angle)
-                    logging.info('Nearest boat speed on vector {:.2f} m/s / {:.2f} kn'.format(boat_speed_ms, boat_speed))
-                    logging.info('Nearest boat angle on vector: {:.2f}°'.format(boat_angle))
+                    logging.debug('Nearest boat speed on vector {:.2f} m/s / {:.2f} kn'.format(boat_speed_ms, boat_speed))
+                    logging.debug('Nearest boat angle on vector: {:.2f}°'.format(boat_angle))
                     self.add_length(vector.get_length())
                     self.add_time(vector.get_length() / boat_speed_ms)
         return impossible_path
@@ -373,7 +379,7 @@ def calculate_best_path(paths, increments):
             if path.calculate_vectors():
                 impossible_paths.append(j)
     
-            logging.info('Path {}: {}'.format(j, path))
+            logging.debug('Path {}: {}'.format(j, path))
 
         for path in sorted(impossible_paths, reverse=True):
             del paths[path]
@@ -390,7 +396,7 @@ def calculate_best_path(paths, increments):
             paths.append(Path(0, Vector(math.radians((wind_direction_x_y + offset) % 360), 1)))
         if len(paths) == 1:
             return paths[0]
-        logging.info('Sorted paths by time: {}'.format(paths))
+        logging.debug('Sorted paths by time: {}'.format(paths))
 
         if x + 1 < increments:
             if paths[0].get_index() == 0 or paths[1].get_index() == 0:
@@ -417,7 +423,7 @@ def calculate_best_path(paths, increments):
             best_path.set_vector(0, Vector(math.radians(90), np.linalg.norm(np.add(first_vector, vector_prefix))))
         else:
             best_path.add_vector_prefix(Vector(math.radians(90), np.linalg.norm(vector_prefix)))
-        logging.info('Updating the best path with the prefix vector')
+        logging.debug('Updating the best path with the prefix vector')
         best_path.calculate_vectors()
 
     return best_path
@@ -429,6 +435,12 @@ def hold_position():
         heading_delta = (((wind_direction_x_y - boat_heading_x_y) + 180) % 360 - 180) * -1
         rudder_servo_value = helpers.map_rudder_servo(heading_delta)
         time.sleep(PATH_CALCULATION_TIMEOUT)
+
+
+def shutdown_routine():
+    gps_thread_stop.set()
+    bno_thread_stop.set()
+    compass_thread_stop.set()
 
 
 def main():
@@ -464,7 +476,7 @@ def main():
             sys, gyro, accel, mag = read_calibration_state(bus)
             logging.info('Calibration data: sys={}, gyro={}, accel={}, mag={}'.format(sys, gyro, accel, mag))
 
-            if sys >= CALIBRATION_THRESHOLD and gyro >= CALIBRATION_THRESHOLD and accel >= CALIBRATION_THRESHOLD and mag >= CALIBRATION_THRESHOLD:
+            if sys >= CALIBRATION_THRESHOLD and gyro >= CALIBRATION_THRESHOLD and accel >= 0 and mag >= CALIBRATION_THRESHOLD:
                 logging.info('Calibration complete!')
                 break
             time.sleep(0.2)
@@ -506,7 +518,7 @@ def main():
             geodesic = Geodesic.WGS84.Inverse(gps['lat'], gps['lon'], waypoint[1], waypoint[0])
 
             while geodesic['s12'] > TARGET_RADIUS:
-                logging.info('Boat gps: {}, {}, timestamp={}'.format(gps['lat'], gps['lon'], gps['timestamp']))
+                logging.info('Boat gps: {}, {}, timestamp={}, speed={}'.format(gps['lat'], gps['lon'], gps['timestamp'], gps['speed']))
                 geodesic = Geodesic.WGS84.Inverse(gps['lat'], gps['lon'], waypoint[1], waypoint[0])
 
                 logging.info('Distance to target: {:.2f}m'.format(geodesic['s12']))
@@ -515,7 +527,7 @@ def main():
 
                 paths = calculate_initial_paths(geodesic['azi1'], geodesic['s12'])
                 best_path = calculate_best_path(paths, PATH_CALCULATION_ITERATIONS)
-                logging.info('Best path is {}'.format(best_path))
+                logging.debug('Best path is {}'.format(best_path))
 
                 logging.info('Real boat heading is: {:.2f}'.format(boat_heading))
 
@@ -524,7 +536,7 @@ def main():
 
                 rudder_servo_value = helpers.map_rudder_servo(heading_delta)
 
-                logging.info('Rudder servo value is: {:.2f}'.format(rudder_servo_value))
+                logging.debug('Rudder servo value is: {:.2f}'.format(rudder_servo_value))
                 servo_pwm.set_pwm(0, 0, rudder_servo_value)
 
                 real_wind_vector = Vector(math.radians((wind_direction_x_y - 180) % 360), wind_speed)
@@ -547,7 +559,7 @@ def main():
 
                 sail_servo_value = helpers.map_sail_servo(sail_angle)
 
-                logging.info('Sail servo value is: {:.2f}'.format(sail_servo_value))
+                logging.debug('Sail servo value is: {:.2f}'.format(sail_servo_value))
                 servo_pwm.set_pwm(1, 0, sail_servo_value)
 
                 time.sleep(PATH_CALCULATION_TIMEOUT)
@@ -555,7 +567,9 @@ def main():
             logging.info('Start new cycle')
         else:
             logging.info('Finished course!')
+            break
             # hold_position()
+    shutdown_routine()
 
 if __name__ == '__main__':
     try:
