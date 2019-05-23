@@ -4,6 +4,7 @@
 import json
 import logging
 import os
+import sys
 import threading
 import time
 
@@ -46,12 +47,12 @@ WIND_ANGLE_THRESHOLD_DEGREE = 30
 WIND_ANGLE_THRESHOLD_DEGREE_OFFSET = 0
 TARGET_RADIUS = 5
 PATH_CALCULATION_ITERATIONS = 1
-PATH_CALCULATION_TIMEOUT = 0.5
+PATH_CALCULATION_TIMEOUT = 0.1
 CALIBRATION_THRESHOLD = 1
 DIRECT_WIND_OFFSET = 45
 GPS_ERROR_TIMEOUT = 2
 
-DEBUG = True
+DEBUG = False
 COMPASS = True
 
 # NORTH = 0
@@ -441,6 +442,8 @@ def shutdown_routine():
     gps_thread_stop.set()
     bno_thread_stop.set()
     compass_thread_stop.set()
+    logging.info('Goodbye :)')
+    sys.exit(0)
 
 
 def main():
