@@ -1,9 +1,23 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
 RUDDER_SERVO_MIN = 220
 RUDDER_SERVO_MAX = 500
 RUDDER_SERVO_MIDDLE = RUDDER_SERVO_MIN + (RUDDER_SERVO_MAX - RUDDER_SERVO_MIN) / 2
 
 SAIL_SERVO_MIN = 280
 SAIL_SERVO_MAX = 460
+
+MS_KN = 1.944
+
+
+def kn_to_ms(kn):
+    return kn / MS_KN
+
+
+def ms_to_kn(ms):
+    return ms * MS_KN
+
 
 def get_sail_angle(awa):
     """Get the sail angle from an apparent wind angle."""
@@ -29,7 +43,7 @@ def map_rudder_servo(heading_delta):
         rudder_value = translate(heading_delta, 0, 90, RUDDER_SERVO_MIDDLE, RUDDER_SERVO_MAX)
     else:
         rudder_value = RUDDER_SERVO_MAX
-        
+
     return round(rudder_value)
 
 
@@ -40,6 +54,7 @@ def map_sail_servo(sail_angle):
 
     sail_value = translate(sail_angle, 0, 90, SAIL_SERVO_MIN, SAIL_SERVO_MAX)
     return round(sail_value)
+
 
 def translate(value, leftMin, leftMax, rightMin, rightMax):
     # Figure out how 'wide' each range is
