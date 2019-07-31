@@ -15,6 +15,8 @@ adafruit-bno055 = "*"
 adafruit-pca9685 = "*"
 pynmea2 = "*"
 "rpi.gpio" = "*"
+pymavlink = "*"
+smbus = "*"
 
 [requires]
-python_version = "3.7"
+python_version = "2"

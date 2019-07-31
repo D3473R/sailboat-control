@@ -8,18 +8,21 @@ from threading import Event
 import geojson
 import math
 import numpy as np
+from os import path
 from Adafruit_PCA9685 import PCA9685
-from geographiclib.geodesic.Geodesic.WGS84 import Inverse
+from geographiclib.geodesic import Geodesic
 
-from .compass import Compass
-from .gps import Gps
-from .wind import Wind
-from .setup_logger import logging
+from store import Store
+from compass import Compass
+from gps import Gps
+from wind import Wind
+from mavlink import Mavlink
+from setup_logger import logging
 
 DEBUG = True
 
 TARGET_RADIUS = 5
-WAYPOINT_FILE = '../json/waypoints.json'
+WAYPOINT_FILE = path.join(path.dirname(path.dirname(path.abspath(__file__))), path.join('json', 'waypoints.json'))
 LINE_DISTANCE_MAX_METERS = 20
 DIRECT_WIND_OFFSET = 45
 
@@ -44,48 +47,51 @@ class Control:
     def __init__(self):
         """ The main control class. """
 
+        self.store = Store()
         self.gps_thread_stop = Event()
         self.wind_thread_stop = Event()
         self.compass_thread_stop = Event()
+        self.mavlink_thread_stop = Event()
 
-        self.gps_thread = Gps(self.gps_thread_stop)
-        self.wind_thread = Wind(self.wind_thread_stop)
-        self.compass_thread = Compass(self.compass_thread_stop)
+        self.gps_thread = Gps(self.gps_thread_stop, self.store)
+        self.wind_thread = Wind(self.wind_thread_stop, self.store)
+        self.compass_thread = Compass(self.compass_thread_stop, self.store)
+        self.mavlink_thread = Mavlink(self.mavlink_thread_stop, self.store)
 
-        self.servo_pwm = PCA9685()
-        self.servo_pwm.set_pwm_freq(60)
+        try:
+            self.servo_pwm = PCA9685()
+            self.servo_pwm.set_pwm_freq(60)
+        except IOError as e:
+            logging.error('ERROR WITH I2C: {}'.format(e))
+            self.shutdown_routine(exit_code=1)
 
         with open(WAYPOINT_FILE) as f:
             self.waypoints = geojson.load(f)
 
         self.cyclic = self.waypoints['properties']['cyclic']
+        self.start_threads()
 
-        while self.gps_thread.gps['status'] != 'A':
+    def run(self):
+        while False and self.store.__getitem__('gps')['status'] != 'A':
             logging.info('Waiting for gps...')
             time.sleep(0.2)
 
-        self.main()
-
-    def main(self):
         while True:
             for i, waypoint in enumerate(self.waypoints['geometry']['coordinates']):
                 logging.info('Using waypoint %i: %s' % (i, waypoint))
 
-                waypoint_geodesic = Inverse(self.gps_thread.gps['lat'], self.gps_thread.gps['lon'],
-                                            waypoint[1], waypoint[0])
+                gps = self.store.__getitem__('gps')
+                waypoint_geodesic = Geodesic.WGS84.Inverse(gps['lat'], gps['lon'], waypoint[1], waypoint[0])
                 boat_geodesic = waypoint_geodesic
 
                 while boat_geodesic['s12'] > TARGET_RADIUS:
-                    logging.info('Boat gps: {}, {}, timestamp={}, speed={}'.format(
-                        self.gps_thread.gps['lat'], self.gps_thread.gps['lon'],
-                        self.gps_thread.gps['timestamp'], self.gps_thread.gps['speed']))
                     waypoint_vector = Vector(math.radians(waypoint_geodesic['azi1']), waypoint_geodesic['s12'])
                     boat_vector = Vector(math.radians(boat_geodesic['azi1']), boat_geodesic['s12'])
 
                     distance_to_line = np.cross(waypoint_vector.get_vector(), boat_vector.get_vector()) / \
                                        np.linalg.norm(waypoint_vector.get_vector())
 
-                    if self.wind_thread.wind < DIRECT_WIND_OFFSET:
+                    if self.store.__getitem__('wind') < DIRECT_WIND_OFFSET:
                         # Waypoint is upwind.
                         pass
 
@@ -101,22 +107,27 @@ class Control:
         self.gps_thread.start()
         self.wind_thread.start()
         self.compass_thread.start()
+        self.mavlink_thread.start()
 
-    def shutdown_routine(self):
+    def shutdown_routine(self, exit_code=0):
         self.gps_thread_stop.set()
         self.wind_thread_stop.set()
         self.compass_thread_stop.set()
-        logging.info('Goodbye :)')
-        sys.exit(0)
+        self.mavlink_thread_stop.set()
+        if exit_code == 0:
+            logging.info('Goodbye :)')
+        else:
+            logging.info('Goodbye :/')
+        sys.exit(exit_code)
 
 
 if __name__ == '__main__':
     control = None
     try:
         control = Control()
+        control.run()
     except KeyboardInterrupt:
-        control.gps_thread_stop.set()
-        control.wind_thread_stop.set()
-        control.compass_thread_stop.set()
+        control.shutdown_routine()
     except Exception as e:
         logging.error('ERROR IN MAIN THREAD: {}'.format(e))
+        control.shutdown_routine(exit_code=1)
