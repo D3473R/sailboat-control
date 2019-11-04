@@ -383,6 +383,16 @@
     </enum>
     <enum name="MAV_CMD">
       <description>Commands to be executed by the MAV. They can be executed on user request, or as part of a mission script. If the action is used in a mission, the parameter mapping to the waypoint/mission message is as follows: Param 1, Param 2, Param 3, Param 4, X: Param 5, Y:Param 6, Z:Param 7. This command list is similar what ARINC 424 is for commercial aircraft: A data format how to interpret waypoint/mission data. See https://mavlink.io/en/guide/xml_schema.html#MAV_CMD for information about the structure of the MAV_CMD entries</description>
+      <entry value="16" name="MAV_CMD_NAV_WAYPOINT" hasLocation="true" isDestination="true">
+        <description>Navigate to waypoint.</description>
+        <param index="1" label="Hold" units="s" minValue="0">Hold time. (ignored by fixed wing, time to stay at waypoint for rotary wing)</param>
+        <param index="2" label="Accept Radius" units="m" minValue="0">Acceptance radius (if the sphere with this radius is hit, the waypoint counts as reached)</param>
+        <param index="3" label="Pass Radius" units="m">0 to pass through the WP, if &gt; 0 radius to pass by WP. Positive value for clockwise orbit, negative value for counter-clockwise orbit. Allows trajectory control.</param>
+        <param index="4" label="Yaw" units="deg">Desired yaw angle at waypoint (rotary wing). NaN for unchanged.</param>
+        <param index="5">Latitude</param>
+        <param index="6">Longitude</param>
+        <param index="7">Altitude</param>
+      </entry>
       <entry value="519" name="MAV_CMD_REQUEST_PROTOCOL_VERSION" hasLocation="false" isDestination="false">
         <description>Request MAVLink protocol version compatibility</description>
         <param index="1" label="Protocol">1: Request supported protocol versions by all nodes on the network</param>
@@ -565,6 +575,23 @@
       <field type="float" name="z">PARAM7 / local: Z coordinate, global: altitude (relative or absolute, depending on frame).</field>
       <extensions/>
       <field type="uint8_t" name="mission_type" enum="MAV_MISSION_TYPE">Mission type.</field>
+    </message>
+    <message id="44" name="MISSION_COUNT">
+      <description>Initiate a new mission.</description>
+      <field type="uint16_t" name="count">Number of mission items in the sequence</field>
+    </message>
+    <message id="51" name="MISSION_REQUEST_INT">
+      <description>Request the information of the mission item with the sequence number seq.</description>
+      <field type="uint16_t" name="seq">Sequence</field>
+    </message>
+    <message id="73" name="MISSION_ITEM_INT">
+      <description>Message encoding a mission item.</description>
+      <field type="uint16_t" name="seq">Sequence</field>
+      <field type="uint16_t" name="command" enum="MAV_CMD">The scheduled action for the waypoint.</field>
+      <field type="uint8_t" name="current">false:0, true:1</field>
+      <field type="uint8_t" name="autocontinue">Autocontinue to next waypoint</field>
+      <field type="int32_t" name="lat" units="degE7">Latitude, expressed</field>
+      <field type="int32_t" name="lon" units="degE7">Longitude, expressed</field>
     </message>
   </messages>
 </mavlink>
