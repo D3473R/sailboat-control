@@ -25,6 +25,7 @@ TARGET_RADIUS = 5
 WAYPOINT_FILE = path.join(path.dirname(path.dirname(path.abspath(__file__))), path.join('json', 'waypoints.json'))
 LINE_DISTANCE_MAX_METERS = 20
 DIRECT_WIND_OFFSET = 45
+CALC_TIMEOUT = 0.2
 
 
 class Vector:
@@ -51,12 +52,12 @@ class Control:
         self.gps_thread_stop = Event()
         self.wind_thread_stop = Event()
         self.compass_thread_stop = Event()
-        self.mavlink_thread_stop = Event()
 
         self.gps_thread = Gps(self.gps_thread_stop, self.store)
         self.wind_thread = Wind(self.wind_thread_stop, self.store)
         self.compass_thread = Compass(self.compass_thread_stop, self.store)
-        self.mavlink_thread = Mavlink(self.mavlink_thread_stop, self.store)
+
+        self.mavlink = Mavlink(self.store)
 
         try:
             self.servo_pwm = PCA9685()
@@ -72,7 +73,7 @@ class Control:
         self.start_threads()
 
     def run(self):
-        while False and self.store.__getitem__('gps')['status'] != 'A':
+        while not DEBUG and self.store.__getitem__('gps')['status'] != 'A':
             logging.info('Waiting for gps...')
             time.sleep(0.2)
 
@@ -94,6 +95,7 @@ class Control:
                     if self.store.__getitem__('wind') < DIRECT_WIND_OFFSET:
                         # Waypoint is upwind.
                         pass
+                    time.sleep(CALC_TIMEOUT)
 
             if self.cyclic:
                 logging.info('Start new cycle')
@@ -107,13 +109,12 @@ class Control:
         self.gps_thread.start()
         self.wind_thread.start()
         self.compass_thread.start()
-        self.mavlink_thread.start()
 
     def shutdown_routine(self, exit_code=0):
         self.gps_thread_stop.set()
         self.wind_thread_stop.set()
         self.compass_thread_stop.set()
-        self.mavlink_thread_stop.set()
+        self.mavlink.shutdown()
         if exit_code == 0:
             logging.info('Goodbye :)')
         else:

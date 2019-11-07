@@ -17,13 +17,16 @@ class Mission():
         self.currentItem = 0
         self.repeatCounter = 0
         self.items = [None] * count
-
-        self.mavlink.send(self.mavlink.connection.mav.mission_request_int_encode(self.currentItem))
+        self.send()
         self.timer = Timer(TIMEOUT_REPEAT, self.repeat)
         self.timer.start()
 
+    def send(self):
+        # No idea why seq has to be 1000
+        self.mavlink.send(self.mavlink.connection.mav.mission_request_int_encode(1000, self.currentItem))
+
     def repeat(self):
-        self.mavlink.send(self.mavlink.connection.mav.mission_request_int_encode(self.currentItem))
+        self.send()
         logging.info('repeating mission request {}/{} with {} tries'.format(self.currentItem, self.count, self.repeatCounter + 1))
         if self.repeatCounter < MAX_REPEAT:
             self.timer = Timer(TIMEOUT_REPEAT, self.repeat)
@@ -31,10 +34,18 @@ class Mission():
         self.repeatCounter += 1
 
     def update(self, item):
-        if item.seq == self.currentItem:
+        if item.count == self.currentItem:
             self.timer.cancel()
-            self.items[item.seq] = item
+            self.items[item.count] = item
             logging.info(item)
-            if item.seq < self.count:
+            if item.count < self.count - 1:
                 self.currentItem += 1
-                self.mavlink.send(self.mavlink.connection.mav.mission_request_int_encode(self.currentItem))
+                self.send()
+            else:
+                self.logMission()
+
+    def logMission(self):
+        s = "Mission: "
+        for item in self.items:
+            s += "count: {} (lat: {}, lng: {}), ".format(item.count, float(item.lat) / 10000000, float(item.lon) / 10000000)
+        logging.info(s)
