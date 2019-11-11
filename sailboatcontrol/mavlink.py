@@ -12,7 +12,7 @@ os.environ['MAVLINK20'] = '1'
 os.environ['MAVLINK_DIALECT'] = 'sailboat'
 
 from pymavlink import mavutil
-import pymavlink.dialects.v20.sailboat as mavlink
+import pymavlink.dialects.v20.sailboat as sailboat
 
 from mission import Mission
 from repeatedTimer import RepeatedTimer
@@ -27,6 +27,7 @@ class Mavlink():
     def __init__(self, store):
         ''' The mavlink telemetry class. '''
         self.store = store
+        self.sailboat = sailboat
 
         self.connection = mavutil.mavlink_connection(MAVLINK_SERIAL_PORT, dialect='sailboat', baud=MAVLINK_SERIAL_BAUD)
 
@@ -61,20 +62,20 @@ class Mavlink():
             m = self.connection.recv_msg()
             if m is not None:
                 logging.info('receiving: {}'.format(m))
-                if type(m) is mavlink.MAVLink_mission_count_message:
+                if type(m) is self.sailboat.MAVLink_mission_count_message:
                     self.mission = Mission(self, m.count)
-                if type(m) is mavlink.MAVLink_mission_item_int_message:
+                if type(m) is self.sailboat.MAVLink_mission_item_int_message:
                     self.mission.update(m)
             # Sleep a little bit to free the CPU
             time.sleep(0.01)
 
     def sendHeartbeat(self):
         self.send(self.connection.mav.heartbeat_encode(
-            mavlink.MAV_TYPE_GENERIC,
-            mavlink.MAV_AUTOPILOT_GENERIC,
-            mavlink.MAV_MODE_FLAG_AUTO_ENABLED,
+            self.sailboat.MAV_TYPE_GENERIC,
+            self.sailboat.MAV_AUTOPILOT_GENERIC,
+            self.sailboat.MAV_MODE_FLAG_AUTO_ENABLED,
             0,
-            mavlink.MAV_STATE_ACTIVE
+            self.sailboat.MAV_STATE_ACTIVE
         ))
 
     def shutdown(self):

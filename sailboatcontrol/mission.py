@@ -7,7 +7,8 @@ from setup_logger import logging
 from threading import Timer
 
 MAX_REPEAT = 5
-TIMEOUT_REPEAT = 10
+TIMEOUT_REPEAT = 2
+
 
 class Mission():
     def __init__(self, mavlink, count):
@@ -31,6 +32,8 @@ class Mission():
         if self.repeatCounter < MAX_REPEAT:
             self.timer = Timer(TIMEOUT_REPEAT, self.repeat)
             self.timer.start()
+        else:
+            self.sendAck(self.mavlink.sailboat.MAV_MISSION_ERROR)
         self.repeatCounter += 1
 
     def update(self, item):
@@ -42,7 +45,11 @@ class Mission():
                 self.currentItem += 1
                 self.send()
             else:
+                self.sendAck(self.mavlink.sailboat.MAV_MISSION_ACCEPTED)
                 self.logMission()
+
+    def sendAck(self, type):
+        self.mavlink.send(self.mavlink.connection.mav.mission_ack_encode(type))
 
     def logMission(self):
         s = "Mission: "

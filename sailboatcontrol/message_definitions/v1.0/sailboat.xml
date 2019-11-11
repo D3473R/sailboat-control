@@ -500,6 +500,15 @@
         <description>Generic error / not accepting mission commands at all right now.</description>
       </entry>
     </enum>
+    <enum name="MAV_MISSION_TYPE">
+      <description>Type of a mission.</description>
+      <entry value="0" name="MAV_MISSION_CYCLIC">
+        <description>repeating round course</description>
+      </entry>
+      <entry value="1" name="MAV_MISSION_LINE">
+        <description>single line course</description>
+      </entry>
+    </enum>
   </enums>
   <messages>
     <message id="0" name="HEARTBEAT">
@@ -560,6 +569,7 @@
     <message id="44" name="MISSION_COUNT">
       <description>Initiate a new mission.</description>
       <field type="uint16_t" name="count">Number of mission items in the sequence</field>
+      <field type="uint16_t" name="cyclic" enum="MAV_MISSION_TYPE">Type of mission</field>
     </message>
     <message id="47" name="MISSION_ACK">
       <description>Acknowledgment message during waypoint handling. The type field states if this message is a positive ack (type=0) or if an error happened (type=non-zero).</description>
