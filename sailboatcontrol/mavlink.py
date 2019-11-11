@@ -58,14 +58,14 @@ class Mavlink():
 
     def receive(self):
         while not self.receive_thread_stop.is_set():
-            while self.connection.port.inWaiting() > 0:
-                m = self.connection.recv_msg()
-                if m is not None:
-                    logging.info('receiving: {}'.format(m))
-                    if type(m) is mavlink.MAVLink_mission_count_message:
-                        self.mission = Mission(self, m.count)
-                    if type(m) is mavlink.MAVLink_mission_item_int_message:
-                        self.mission.update(m)
+            m = self.connection.recv_msg()
+            if m is not None:
+                logging.info('receiving: {}'.format(m))
+                if type(m) is mavlink.MAVLink_mission_count_message:
+                    self.mission = Mission(self, m.count)
+                if type(m) is mavlink.MAVLink_mission_item_int_message:
+                    self.mission.update(m)
+            # Sleep a little bit to free the CPU
             time.sleep(0.01)
 
     def sendHeartbeat(self):

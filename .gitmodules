@@ -1,3 +1,4 @@
 [submodule "sailboatcontrol/pymavlink"]
 	path = sailboatcontrol/pymavlink
 	url = https://github.com/ArduPilot/pymavlink.git
+	ignore = dirty
